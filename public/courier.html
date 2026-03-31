@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Курьер | Доставка KZ</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#2196F3">
+</head>
+<body>
+<div class="container">
+    <div id="authCourier">
+        <h2>Вход курьера</h2>
+        <input type="text" id="cLogin" placeholder="Логин" value="courier1">
+        <input type="password" id="cPass" placeholder="Пароль" value="123">
+        <button class="btn btn-lg" onclick="courierAuth()">Войти</button>
+    </div>
+
+    <div id="courierMain" style="display:none;">
+        <h3>Мои задания на день</h3>
+        <div id="courierOrders"></div>
+
+        <div id="orderDetail" class="card" style="display:none;">
+            <h4 id="detailTitle"></h4>
+            <p id="detailAddr"></p>
+            <button class="btn btn-lg" onclick="buildRoute()">Построить маршрут</button>
+            <hr>
+            <button class="btn btn-lg" onclick="setStatusArrive()">Прибыл на склад</button>
+            <button class="btn btn-lg" onclick="setStatusPick()">Забрал груз + фото</button>
+            <input type="file" id="cargoPhoto" accept="image/*">
+            <button class="btn btn-lg" onclick="setStatusOnWay()">В пути</button>
+            <button class="btn btn-lg" onclick="setStatusDelivered()">Доставлено</button>
+            <canvas id="signCanvas" width="300" height="150"></canvas>
+            <button onclick="clearSign()">Очистить подпись</button>
+        </div>
+    </div>
+</div>
+<script src="/js/courier.js"></script>
+</body>
+</html>

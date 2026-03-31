@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Личный кабинет клиента | Доставка KZ</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#2196F3">
+</head>
+<body>
+<div class="container">
+    <div id="authBlock">
+        <h2>Вход для клиента</h2>
+        <input type="text" id="login" placeholder="Логин" value="client">
+        <input type="password" id="pass" placeholder="Пароль" value="123">
+        <button class="btn" onclick="auth()">Войти</button>
+    </div>
+
+    <div id="clientMain" style="display:none;">
+        <h2>Создать новую заявку</h2>
+        <div class="card">
+            <h4>Точка А: Склад</h4>
+            <select id="warehouse">
+                <option>Склад №3, Алматы, ул. Тимирязева</option>
+                <option>Склад №2, Алматы, мкр Аксай-3</option>
+                <option value="custom">Свой адрес склада</option>
+            </select>
+            <input type="text" id="customWarehouse" placeholder="Введите адрес склада" style="display:none;">
+
+            <h4>Точка Б: Адрес доставки</h4>
+            <input type="text" id="clientAddr" placeholder="Начните вводить адрес...">
+
+            <h4>Параметры груза</h4>
+            <input type="number" id="weight" placeholder="Вес (кг)" value="5">
+            <input type="text" id="size" placeholder="Габариты">
+            <select id="cargoType">
+                <option>Документы</option>
+                <option>Хрупкое</option>
+                <option>Крупногабарит</option>
+                <option>Стройматериалы</option>
+            </select>
+
+            <h4>Срочность</h4>
+            <select id="urgent">
+                <option value="1">Обычная доставка</option>
+                <option value="1.5">Срочная (+50%)</option>
+            </select>
+
+            <h4>Дата и время</h4>
+            <select id="dateSel">
+                <option>Сегодня</option>
+                <option>Завтра</option>
+            </select>
+            <input type="text" id="timeSlot" placeholder="Интервал, например 10:00-12:00">
+
+            <div class="card">
+                <h4>Рассчитанная стоимость</h4>
+                <p id="priceRes">0 тенге</p>
+            </div>
+
+            <button class="btn btn-lg" onclick="calcPrice()">Рассчитать цену</button>
+            <button class="btn btn-lg" onclick="createOrder()">Оформить заказ и оплатить</button>
+        </div>
+
+        <hr>
+        <h3>Мои заказы и отслеживание</h3>
+        <div id="ordersList"></div>
+        <div id="map"></div>
+    </div>
+</div>
+<script src="/js/client.js"></script>
+<script src="https://api-maps.yandex.ru/2.1/?lang=ru_RU"></script>
+<script src="/js/map.js"></script>
+</body>
+</html>
