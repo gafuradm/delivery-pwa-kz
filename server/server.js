@@ -4,7 +4,8 @@ const fs = require('fs-extra');
 const path = require('path');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 8080;
+const HOST = '0.0.0.0';
 
 app.use(cors());
 app.use(express.json());
@@ -81,4 +82,6 @@ app.patch('/api/couriers/:id/geo', async (req,res)=>{
   }
 });
 
-app.listen(PORT,()=>console.log(`Server run :${PORT}`));
+app.listen(PORT, HOST, () => {
+  console.log(`Server running on http://${HOST}:${PORT}`);
+});
