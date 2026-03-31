@@ -1,36 +1,31 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Диспетчер панель | Доставка KZ</title>
-    <link rel="stylesheet" href="/css/style.css">
-    <link rel="manifest" href="/manifest.json">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Админ</title>
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<div class="container">
-    <div id="adminAuth">
-        <h2>Вход диспетчера</h2>
-        <input type="text" id="aLogin" value="admin">
-        <input type="password" id="aPass" value="123">
-        <button class="btn" onclick="adminAuth()">Войти</button>
-    </div>
+  <div id="adminAuth">
+    <h2>Админ</h2>
+    <input id="aLogin" placeholder="Логин">
+    <input id="aPass" type="password" placeholder="Пароль">
+    <button onclick="adminAuth()">Войти</button>
+  </div>
 
-    <div id="adminPanel" style="display:none;">
-        <h2>Карта всех заказов</h2>
-        <div id="map" style="height:500px;"></div>
+  <div id="adminPanel" style="display:none">
+    <h3>Карта</h3>
+    <div id="map" style="width:100%;height:300px"></div>
 
-        <hr>
-        <h3>Список заказов | Назначить курьера</h3>
-        <div id="adminOrders"></div>
+    <h3>Заказы</h3>
+    <div id="adminOrders"></div>
 
-        <hr>
-        <h3>Отчеты и зарплаты курьеров</h3>
-        <div id="financeReport"></div>
-    </div>
-</div>
-<script src="https://api-maps.yandex.ru/3.0/?apikey=f7f759d3-32a1-4a81-b0d6-af84623e1b4d&lang=ru_RU"></script>
-<script src="/js/admin.js"></script>
-<script src="/js/map.js"></script>
+    <h3>Зарплаты</h3>
+    <div id="financeReport"></div>
+  </div>
+
+  <script src="https://api-maps.yandex.ru/3.0/?apikey=f7f759d3-32a1-4a81-b0d6-af84623e1b4d&lang=ru_RU"></script>
+  <script src="js/admin.js"></script>
 </body>
 </html>

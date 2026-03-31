@@ -1,9 +1,22 @@
-function initYandexMap(){
-    ymaps.ready(()=>{
-        const map = new ymaps.Map("map",{center:[43.25,76.95],zoom:12});
-        const input = document.getElementById("clientAddr");
-        if(input){
-            const suggestView = new ymaps.SuggestView(input);
-        }
-    });
+let map;
+
+async function initYandexMap() {
+  await ymaps3.ready;
+
+  const { YMap, YMapDefaultSchemeLayer, YMapDefaultFeaturesLayer } = ymaps3;
+
+  map = new YMap(document.getElementById('map'), {
+    location: { center: [76.95, 43.25], zoom: 12 }
+  });
+
+  map.addChild(new YMapDefaultSchemeLayer());
+  map.addChild(new YMapDefaultFeaturesLayer());
+}
+
+function setPointA(text) {
+  document.getElementById("pointA").value = text;
+}
+
+function setPointB(text) {
+  document.getElementById("pointB").value = text;
 }

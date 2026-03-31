@@ -1,41 +1,37 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Курьер | Доставка KZ</title>
-    <link rel="stylesheet" href="/css/style.css">
-    <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#2196F3">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Курьер</title>
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<div class="container">
-    <div id="authCourier">
-        <h2>Вход курьера</h2>
-        <input type="text" id="cLogin" placeholder="Логин" value="courier1">
-        <input type="password" id="cPass" placeholder="Пароль" value="123">
-        <button class="btn btn-lg" onclick="courierAuth()">Войти</button>
-    </div>
+  <div id="authCourier">
+    <h2>Курьер</h2>
+    <input id="cLogin" placeholder="Логин">
+    <input id="cPass" type="password" placeholder="Пароль">
+    <button onclick="courierAuth()">Войти</button>
+  </div>
 
-    <div id="courierMain" style="display:none;">
-        <h3>Мои задания на день</h3>
-        <div id="courierOrders"></div>
+  <div id="courierMain" style="display:none">
+    <h3>Мои заказы</h3>
+    <div id="courierOrders"></div>
 
-        <div id="orderDetail" class="card" style="display:none;">
-            <h4 id="detailTitle"></h4>
-            <p id="detailAddr"></p>
-            <button class="btn btn-lg" onclick="buildRoute()">Построить маршрут</button>
-            <hr>
-            <button class="btn btn-lg" onclick="setStatusArrive()">Прибыл на склад</button>
-            <button class="btn btn-lg" onclick="setStatusPick()">Забрал груз + фото</button>
-            <input type="file" id="cargoPhoto" accept="image/*">
-            <button class="btn btn-lg" onclick="setStatusOnWay()">В пути</button>
-            <button class="btn btn-lg" onclick="setStatusDelivered()">Доставлено</button>
-            <canvas id="signCanvas" width="300" height="150"></canvas>
-            <button onclick="clearSign()">Очистить подпись</button>
-        </div>
+    <div id="orderDetail" style="display:none">
+      <h4 id="detailTitle"></h4>
+      <p id="detailAddr"></p>
+      <input type="file" id="cargoPhoto" accept="image/*">
+      <button onclick="buildRoute()">Маршрут</button>
+      <button onclick="setStatusArrive()">Прибыл</button>
+      <button onclick="setStatusPick()">Забрал</button>
+      <button onclick="setStatusOnWay()">В пути</button>
+      <button onclick="setStatusDelivered()">Доставил</button>
+      <canvas id="signCanvas" width="300" height="150" style="border:1px solid #000"></canvas>
+      <button onclick="clearSign()">Очистить подпись</button>
     </div>
-</div>
-<script src="/js/courier.js"></script>
+  </div>
+
+  <script src="js/courier.js"></script>
 </body>
 </html>
