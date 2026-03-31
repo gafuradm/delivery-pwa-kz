@@ -1,15 +1,7 @@
-# fly.toml app configuration file generated for delivery-pwa-kz on 2026-03-31T11:40:12Z
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
-
-app = 'delivery-pwa-kz'
-primary_region = 'ams'
-
-[build]
-builder = "Dockerfile"
+app = "delivery-pwa-kz"
+primary_region = "ams"
 
 [http_service]
-internal_port = 3000
-force_https = true
-min_machines_running = 1
+  internal_port = 8080
+  force_https = true
+  min_machines_running = 1
