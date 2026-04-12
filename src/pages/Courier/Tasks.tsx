@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabaseClient';
 import { getRouteDistance } from '../../lib/yandexMaps';
 import DeliveryConfirmationModal from '../../components/DeliveryConfirmationModal';
 import Receipt from '../../components/Receipt';
 import VideoCall from '../../components/VideoCall';
 import { cacheOrder, getCachedOrders, addOfflineAction, getOfflineActions, clearOfflineActions } from '../../lib/db';
-import { Link } from 'react-router-dom';
+import VoiceAssistant from '../../components/VoiceAssistant';
+import LanguageSwitcher from '../../components/LanguageSwitcher';
 
 interface Order {
   id: string;
@@ -17,6 +19,7 @@ interface Order {
   fragile: boolean;
   status: string;
   delivery_code: string;
+  price?: number;
   photo_url?: string;
   signature_url?: string;
 }
@@ -31,6 +34,7 @@ interface Point {
 }
 
 export default function Tasks() {
+  const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
   const [optimizing, setOptimizing] = useState(false);
@@ -46,6 +50,7 @@ export default function Tasks() {
   const [callUserName, setCallUserName] = useState('');
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [profile, setProfile] = useState<{ rating: number }>({ rating: 5 });
+  const [voiceLang, setVoiceLang] = useState<'ru' | 'kk'>('ru');
 
   // Загрузка профиля (рейтинг)
   useEffect(() => {
@@ -299,18 +304,75 @@ export default function Tasks() {
     setShowCall(true);
   };
 
+  // Обработка голосовых команд
+  const handleVoiceCommand = (command: string) => {
+    switch (command) {
+      case 'profile':
+        navigate('/profile');
+        break;
+      case 'logout':
+        supabase.auth.signOut().then(() => navigate('/'));
+        break;
+      case 'optimize':
+        optimizeRoute();
+        break;
+      case 'refresh':
+        loadOrders();
+        break;
+      case 'accept-order':
+        if (orders.length > 0 && orders[0].status === 'pending') updateStatus(orders[0].id, 'accepted');
+        else alert('Нет доступных заказов для принятия');
+        break;
+      case 'picked-up':
+        if (orders.length > 0 && orders[0].status === 'accepted') updateStatus(orders[0].id, 'picked_up');
+        else alert('Нет заказов в статусе "принят"');
+        break;
+      case 'in-transit':
+        if (orders.length > 0 && orders[0].status === 'picked_up') updateStatus(orders[0].id, 'in_transit');
+        else alert('Нет заказов в статусе "забран"');
+        break;
+      case 'deliver':
+        if (orders.length > 0 && orders[0].status === 'in_transit') {
+          setCurrentOrderId(orders[0].id);
+          setShowDeliveryModal(true);
+        } else alert('Нет заказов в пути');
+        break;
+      case 'navigate-to-warehouse':
+        if (orders.length > 0) navigateTo(orders[0].from_address);
+        break;
+      case 'navigate-to-client':
+        if (orders.length > 0) navigateTo(orders[0].to_address);
+        break;
+      case 'call-client':
+        if (orders.length > 0) startCall(`${orders[0].id}-client`, 'Курьер');
+        break;
+      case 'order-status':
+        alert(orders.map(o => `${o.id.slice(0,8)}: ${o.status}`).join('\n') || 'Нет активных заказов');
+        break;
+      case 'order-count':
+        alert(`У вас ${orders.length} активных заказов`);
+        break;
+      case 'my-rating':
+        alert(`Ваш рейтинг: ${profile.rating.toFixed(1)}`);
+        break;
+      case 'earnings':
+        const todayEarnings = orders.filter(o => o.status === 'delivered').reduce((sum, o) => sum + (o.price || 0), 0);
+        alert(`За сегодня вы заработали ${todayEarnings} тенге`);
+        break;
+      default:
+        break;
+    }
+  };
+
+  const ordersCount = orders.length;
+  const rating = profile.rating;
+  const todayEarnings = orders.filter(o => o.status === 'delivered').reduce((sum, o) => sum + (o.price || 0), 0);
+
   return (
     <div className="container">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <h1 style={{ margin: 0 }}>Мои задания</h1>
-        <div>
-          <Link to="/profile" className="btn-primary" style={{ marginRight: 10, background: '#6c757d' }}>👤 Профиль</Link>
-          <Link to="/performance" className="btn-primary" style={{ marginRight: 10, background: '#6c757d' }}>📊 Моя эффективность</Link>
-          <button onClick={() => supabase.auth.signOut().then(() => window.location.href = '/')} className="btn-primary" style={{ background: '#dc2626' }}>Выйти</button>
-        </div>
-      </div>
-        <div>⭐ Рейтинг: {profile.rating.toFixed(1)}</div>
+        <h1>Мои задания</h1>
+        <div>⭐ Рейтинг: {rating.toFixed(1)}</div>
       </div>
       <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
         <button onClick={loadOrders} className="btn-primary">🔄 Обновить</button>
@@ -366,6 +428,16 @@ export default function Tasks() {
       {showCall && (
         <VideoCall roomName={callRoom} userName={callUserName} onClose={() => setShowCall(false)} />
       )}
+
+      {/* Голосовой помощник */}
+      <LanguageSwitcher onLanguageChange={setVoiceLang} />
+      <VoiceAssistant 
+        onCommand={handleVoiceCommand} 
+        language={voiceLang}
+        ordersCount={ordersCount}
+        rating={rating}
+        todayEarnings={todayEarnings}
+      />
     </div>
   );
 }
