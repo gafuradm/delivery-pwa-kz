@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabaseClient';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
-import { Link } from 'react-router-dom';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell } from 'recharts';
 
 interface WorkerStats {
   id: string;
@@ -27,24 +26,21 @@ export default function Analytics() {
 
   const loadData = async () => {
     setLoading(true);
-    // Загружаем всех курьеров и сборщиков
     const { data } = await supabase
       .from('profiles')
       .select('id, full_name, role, rating, total_deliveries, total_earnings, salary, efficiency, current_load')
       .in('role', ['courier', 'collector'])
       .order('rating', { ascending: false });
     if (data) setWorkers(data);
-    
-    // Генерируем AI-анализ (используем DeepSeek или локальную логику)
     await generateAIAnalysis(data || []);
     generateSalaryReport(data || []);
     setLoading(false);
   };
 
   const generateAIAnalysis = async (workersData: WorkerStats[]) => {
-    const prompt = `Проанализируй эффективность курьеров и сборщиков на основе данных:\n${workersData.map(w => `${w.full_name} (${w.role}): рейтинг ${w.rating}, доставок ${w.total_deliveries}, эффективность ${w.efficiency}%, загрузка ${w.current_load}`).join('\n')}\nДай краткие рекомендации по улучшению работы и выдели лучших и отстающих.`;
-    // Здесь можно вызвать DeepSeek API, но для демо используем заглушку
-    setAiAnalysis(`⭐ Лучший курьер: ${workersData.filter(w => w.role === 'courier').sort((a,b) => b.rating - a.rating)[0]?.full_name || 'нет'}.\n⚠️ Отстающий сборщик: ${workersData.filter(w => w.role === 'collector').sort((a,b) => a.rating - b.rating)[0]?.full_name || 'нет'}.\n📈 Рекомендуется повысить мотивацию через бонусы за высокий рейтинг.`);
+    const bestCourier = workersData.filter(w => w.role === 'courier').sort((a,b) => b.rating - a.rating)[0];
+    const worstCollector = workersData.filter(w => w.role === 'collector').sort((a,b) => a.rating - b.rating)[0];
+    setAiAnalysis(`⭐ Лучший курьер: ${bestCourier?.full_name || 'нет'} (рейтинг ${bestCourier?.rating?.toFixed(1) || 0})\n⚠️ Отстающий сборщик: ${worstCollector?.full_name || 'нет'} (рейтинг ${worstCollector?.rating?.toFixed(1) || 0})\n📈 Рекомендуется провести тренинг для отстающих и ввести бонусы за высокий рейтинг.`);
   };
 
   const generateSalaryReport = (workersData: WorkerStats[]) => {
@@ -58,7 +54,6 @@ export default function Analytics() {
     });
   };
 
-  // Данные для графиков
   const ratingData = workers.map(w => ({ name: w.full_name?.split(' ')[0] || w.id.slice(0,6), rating: w.rating }));
   const deliveriesData = workers.filter(w => w.role === 'courier').map(w => ({ name: w.full_name?.split(' ')[0] || w.id.slice(0,6), deliveries: w.total_deliveries }));
   const loadDataForPie = [
@@ -67,22 +62,12 @@ export default function Analytics() {
   ];
   const COLORS = ['#0088FE', '#00C49F'];
 
-  if (loading) return <div className="container">Загрузка аналитики...</div>;
+  if (loading) return <div>Загрузка аналитики...</div>;
 
   return (
-    <div className="container">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <h1>Аналитика диспетчера</h1>
-        <div>
-          <Link to="/" className="btn-primary" style={{ marginRight: 10, background: '#6c757d' }}>← Назад</Link>
-          <Link to="/profile" className="btn-primary" style={{ marginRight: 10, background: '#6c757d' }}>👤 Профиль</Link>
-          <button onClick={() => supabase.auth.signOut().then(() => window.location.href = '/')} className="btn-primary" style={{ background: '#dc2626' }}>Выйти</button>
-        </div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-        {/* Рейтинг сотрудников */}
-        <div style={{ background: 'white', padding: 15, borderRadius: 10 }}>
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+        <div className="card">
           <h3>⭐ Рейтинг сотрудников</h3>
           <BarChart width={400} height={300} data={ratingData}>
             <CartesianGrid strokeDasharray="3 3" />
@@ -93,9 +78,7 @@ export default function Analytics() {
             <Bar dataKey="rating" fill="#8884d8" />
           </BarChart>
         </div>
-
-        {/* Количество доставок по курьерам */}
-        <div style={{ background: 'white', padding: 15, borderRadius: 10 }}>
+        <div className="card">
           <h3>📦 Доставки по курьерам</h3>
           <BarChart width={400} height={300} data={deliveriesData}>
             <CartesianGrid strokeDasharray="3 3" />
@@ -106,9 +89,7 @@ export default function Analytics() {
             <Bar dataKey="deliveries" fill="#82ca9d" />
           </BarChart>
         </div>
-
-        {/* Состав команды */}
-        <div style={{ background: 'white', padding: 15, borderRadius: 10 }}>
+        <div className="card">
           <h3>👥 Состав команды</h3>
           <PieChart width={300} height={300}>
             <Pie data={loadDataForPie} cx="50%" cy="50%" labelLine={false} label={entry => entry.name} outerRadius={80} fill="#8884d8" dataKey="value">
@@ -117,27 +98,25 @@ export default function Analytics() {
             <Tooltip />
           </PieChart>
         </div>
-
-        {/* AI-анализ */}
-        <div style={{ background: '#f0f9ff', padding: 15, borderRadius: 10 }}>
+        <div className="card" style={{ background: 'var(--bg-secondary)' }}>
           <h3>🤖 AI-анализ эффективности</h3>
           <p style={{ whiteSpace: 'pre-wrap' }}>{aiAnalysis}</p>
         </div>
       </div>
 
-      {/* Отчёт по зарплатам */}
       {salaryReport && (
-        <div style={{ background: 'white', padding: 15, borderRadius: 10, marginTop: 20 }}>
+        <div className="card" style={{ marginBottom: '1rem' }}>
           <h3>💰 Финансовый отчёт</h3>
-          <p>Общая зарплата курьеров: {salaryReport.totalCourierSalary} ₸</p>
-          <p>Общая зарплата сборщиков: {salaryReport.totalCollectorSalary} ₸</p>
-          <p>Средняя эффективность курьеров: {salaryReport.avgCourierEfficiency.toFixed(1)}%</p>
-          <p>Средняя эффективность сборщиков: {salaryReport.avgCollectorEfficiency.toFixed(1)}%</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+            <p>Общая зарплата курьеров: {salaryReport.totalCourierSalary} ₸</p>
+            <p>Общая зарплата сборщиков: {salaryReport.totalCollectorSalary} ₸</p>
+            <p>Средняя эффективность курьеров: {salaryReport.avgCourierEfficiency.toFixed(1)}%</p>
+            <p>Средняя эффективность сборщиков: {salaryReport.avgCollectorEfficiency.toFixed(1)}%</p>
+          </div>
         </div>
       )}
 
-      {/* Таблица сотрудников */}
-      <div style={{ background: 'white', padding: 15, borderRadius: 10, marginTop: 20, overflowX: 'auto' }}>
+      <div className="card" style={{ overflowX: 'auto' }}>
         <h3>📋 Список сотрудников</h3>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
@@ -145,14 +124,14 @@ export default function Analytics() {
           </thead>
           <tbody>
             {workers.map(w => (
-              <tr key={w.id} style={{ borderTop: '1px solid #ddd' }}>
-                <td>{w.full_name || w.id.slice(0,8)}</td>
-                <td>{w.role === 'courier' ? 'Курьер' : 'Сборщик'}</td>
-                <td>{w.rating?.toFixed(1)}</td>
-                <td>{w.total_deliveries || 0}</td>
-                <td>{w.salary || 0} ₸</td>
-                <td>{w.efficiency || 0}%</td>
-                <td>{w.current_load || 0}</td>
+              <tr key={w.id} style={{ borderTop: '1px solid var(--border)' }}>
+                <td style={{ padding: '0.5rem' }}>{w.full_name || w.id.slice(0,8)}</td>
+                <td style={{ padding: '0.5rem' }}>{w.role === 'courier' ? 'Курьер' : 'Сборщик'}</td>
+                <td style={{ padding: '0.5rem' }}>{w.rating?.toFixed(1)}</td>
+                <td style={{ padding: '0.5rem' }}>{w.total_deliveries || 0}</td>
+                <td style={{ padding: '0.5rem' }}>{w.salary || 0} ₸</td>
+                <td style={{ padding: '0.5rem' }}>{w.efficiency || 0}%</td>
+                <td style={{ padding: '0.5rem' }}>{w.current_load || 0}</td>
               </tr>
             ))}
           </tbody>

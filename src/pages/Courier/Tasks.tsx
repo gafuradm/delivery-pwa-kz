@@ -52,7 +52,6 @@ export default function Tasks() {
   const [profile, setProfile] = useState<{ rating: number }>({ rating: 5 });
   const [voiceLang, setVoiceLang] = useState<'ru' | 'kk'>('ru');
 
-  // Загрузка профиля (рейтинг)
   useEffect(() => {
     const fetchProfile = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -84,7 +83,6 @@ export default function Tasks() {
     }
   };
 
-  // Синхронизация офлайн-действий
   useEffect(() => {
     const syncOfflineActions = async () => {
       const actions = await getOfflineActions();
@@ -102,7 +100,6 @@ export default function Tasks() {
     if (isOnline) syncOfflineActions();
   }, [isOnline]);
 
-  // Слушаем изменения сети
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -123,7 +120,6 @@ export default function Tasks() {
     return () => { supabase.removeChannel(channel); };
   }, [isOnline]);
 
-  // Геолокация
   useEffect(() => {
     const startGeo = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -304,7 +300,6 @@ export default function Tasks() {
     setShowCall(true);
   };
 
-  // Обработка голосовых команд
   const handleVoiceCommand = (command: string) => {
     switch (command) {
       case 'profile':
@@ -380,17 +375,19 @@ export default function Tasks() {
           {optimizing ? 'Оптимизация...' : '✨ Оптимизировать маршрут'}
         </button>
       </div>
-      {!isOnline && <div style={{ background: '#fee2e2', padding: 8, borderRadius: 8, marginBottom: 10 }}>⚠️ Офлайн-режим. Действия будут синхронизированы позже.</div>}
+      {!isOnline && <div className="card" style={{ background: '#fee2e2', marginBottom: 10 }}>⚠️ Офлайн-режим. Действия будут синхронизированы позже.</div>}
 
       {optimizedSequence.length > 0 && (
-        <div style={{ background: '#e0f2fe', padding: 15, borderRadius: 10, marginBottom: 20 }}>
+        <div className="card" style={{ marginBottom: 20, overflowX: 'auto' }}>
           <h3>📌 Оптимальный порядок маршрута</h3>
-          <ol>
+          <ol style={{ paddingLeft: '1.5rem', margin: 0 }}>
             {optimizedSequence.map((point, idx) => (
-              <li key={point.id} style={{ marginBottom: 10 }}>
+              <li key={point.id} style={{ marginBottom: 8, wordBreak: 'break-word' }}>
                 {point.type === 'pickup' ? '📦 Забрать со склада:' : '🏠 Доставить клиенту:'}
                 <strong> {point.address}</strong>
-                <button onClick={() => navigateTo(point.address)} style={{ marginLeft: 10, padding: '4px 8px' }}>🗺️ Проложить маршрут</button>
+                <button onClick={() => navigateTo(point.address)} className="btn-secondary" style={{ marginLeft: 10, padding: '4px 8px', fontSize: '0.8rem' }}>
+                  🗺️ Проложить маршрут
+                </button>
               </li>
             ))}
           </ol>
@@ -398,17 +395,17 @@ export default function Tasks() {
       )}
 
       {orders.map(order => (
-        <div key={order.id} style={{ background: 'white', padding: 15, margin: 10, borderRadius: 10 }}>
+        <div key={order.id} className="card" style={{ marginBottom: 10 }}>
           <p><strong>Заказ #{order.id.slice(0, 8)}</strong></p>
           <p>Откуда: {order.from_address}</p>
           <p>Куда: {order.to_address}</p>
           <p>Вес: {order.weight_kg} кг | Хрупкий: {order.fragile ? 'Да' : 'Нет'}</p>
           <p>Статус: {order.status}</p>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button onClick={() => updateStatus(order.id, 'accepted')} disabled={loading}>✅ Принять</button>
-            <button onClick={() => updateStatus(order.id, 'picked_up')} disabled={loading}>📦 Забрал</button>
-            <button onClick={() => updateStatus(order.id, 'in_transit')} disabled={loading}>🚗 В пути</button>
-            <button onClick={() => { setCurrentOrderId(order.id); setShowDeliveryModal(true); }} disabled={loading}>🏠 Доставить (с фото и подписью)</button>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+            <button onClick={() => updateStatus(order.id, 'accepted')} disabled={loading} className="btn-primary">✅ Принять</button>
+            <button onClick={() => updateStatus(order.id, 'picked_up')} disabled={loading} className="btn-primary" style={{ background: '#f59e0b' }}>📦 Забрал</button>
+            <button onClick={() => updateStatus(order.id, 'in_transit')} disabled={loading} className="btn-primary" style={{ background: '#3b82f6' }}>🚗 В пути</button>
+            <button onClick={() => { setCurrentOrderId(order.id); setShowDeliveryModal(true); }} disabled={loading} className="btn-primary" style={{ background: '#10b981' }}>🏠 Доставить (с фото и подписью)</button>
             <button onClick={() => startCall(`${order.id}-client`, 'Курьер')} className="btn-primary" style={{ background: '#6c757d' }}>📞 Позвонить клиенту</button>
           </div>
         </div>
@@ -429,7 +426,6 @@ export default function Tasks() {
         <VideoCall roomName={callRoom} userName={callUserName} onClose={() => setShowCall(false)} />
       )}
 
-      {/* Голосовой помощник */}
       <LanguageSwitcher onLanguageChange={setVoiceLang} />
       <VoiceAssistant 
         onCommand={handleVoiceCommand} 

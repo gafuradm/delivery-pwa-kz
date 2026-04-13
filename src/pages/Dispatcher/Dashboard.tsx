@@ -146,15 +146,7 @@ export default function Dashboard() {
 
   return (
     <div className="container">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <h1 style={{ margin: 0 }}>Диспетчерская панель</h1>
-        <div>
-          <Link to="/profile" className="btn-primary" style={{ marginRight: 10, background: '#6c757d' }}>👤 Профиль</Link>
-          <Link to="/analytics" className="btn-primary" style={{ background: '#8b5cf6', marginLeft: 10 }}>📊 Аналитика</Link>
-          <button onClick={() => supabase.auth.signOut().then(() => window.location.href = '/')} className="btn-primary" style={{ background: '#dc2626' }}>Выйти</button>
-        </div>
-      </div>
-      <button onClick={loadData} style={{ marginBottom: 10 }}>🔄 Обновить</button>
+      <button onClick={loadData} className="btn-secondary" style={{ marginBottom: '1rem' }}>🔄 Обновить</button>
       
       {orders.map(order => (
         <div key={order.id} style={{ background: statusColor[order.status] || 'white', padding: 15, margin: 10, borderRadius: 10, border: '1px solid #ddd' }}>
