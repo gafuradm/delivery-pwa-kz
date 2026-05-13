@@ -4,7 +4,8 @@ import { useNavigate } from 'react-router-dom';
 
 export default function Profile() {
   const [user, setUser] = useState<any>(null);
-  const [profile, setProfile] = useState<any>({ full_name: '', phone: '', avatar_url: '' });
+  const [profile, setProfile] = useState<any>({ full_name: '', phone: '', avatar_url: '', vehicle_type: 'small' });
+  const [role, setRole] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const navigate = useNavigate();
@@ -15,7 +16,10 @@ export default function Profile() {
       if (!user) { navigate('/'); return; }
       setUser(user);
       const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-      if (data) setProfile(data);
+      if (data) {
+        setProfile(data);
+        setRole(data.role);
+      }
     };
     fetchUser();
   }, [navigate]);
@@ -23,7 +27,15 @@ export default function Profile() {
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    const { error } = await supabase.from('profiles').update({ full_name: profile.full_name, phone: profile.phone }).eq('id', user.id);
+    const { error } = await supabase
+      .from('profiles')
+      .update({ 
+        full_name: profile.full_name, 
+        phone: profile.phone, 
+        avatar_url: profile.avatar_url,
+        vehicle_type: profile.vehicle_type 
+      })
+      .eq('id', user.id);
     if (error) alert('Ошибка: ' + error.message);
     else alert('Профиль обновлён');
     setLoading(false);
@@ -57,6 +69,15 @@ export default function Profile() {
       <form onSubmit={handleUpdate}>
         <input type="text" placeholder="Полное имя" value={profile.full_name || ''} onChange={e => setProfile({ ...profile, full_name: e.target.value })} style={{ width: '100%', marginBottom: '1rem' }} />
         <input type="tel" placeholder="Телефон" value={profile.phone || ''} onChange={e => setProfile({ ...profile, phone: e.target.value })} style={{ width: '100%', marginBottom: '1rem' }} />
+        
+        {/* Показываем выбор машины только НЕ крановщику */}
+        {role !== 'crane_operator' && (
+          <select value={profile.vehicle_type || 'small'} onChange={e => setProfile({ ...profile, vehicle_type: e.target.value })} style={{ width: '100%', marginBottom: '1rem' }}>
+            <option value="small">🚗 Маленькая машина (до 50 кг, обычные товары)</option>
+            <option value="large">🚛 Большегрузная машина (от 50 кг или крупногабарит)</option>
+          </select>
+        )}
+        
         <button type="submit" disabled={loading} className="btn-primary" style={{ width: '100%' }}>{loading ? 'Сохранение...' : 'Сохранить'}</button>
       </form>
     </div>

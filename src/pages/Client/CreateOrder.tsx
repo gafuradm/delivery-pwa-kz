@@ -4,6 +4,12 @@ import { supabase } from '../../lib/supabaseClient';
 import { loadYandexMaps, geocodeAddress, getRouteDistance } from '../../lib/yandexMaps';
 import { getWeatherInfo, WeatherInfo } from '../../lib/weather';
 
+declare global {
+  interface Window {
+    _createMapCreating?: boolean;
+  }
+}
+
 interface CartItem {
   product_id: string;
   product_name: string;
@@ -26,7 +32,6 @@ export default function CreateOrder() {
   const [toConfirmed, setToConfirmed] = useState(false);
   const mapRef = useRef<any>(null);
   const ymapsRef = useRef<any>(null);
-  const [map, setMap] = useState<any>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [weatherInfo, setWeatherInfo] = useState<WeatherInfo | null>(null);
   const [totalProductsPrice, setTotalProductsPrice] = useState(0);
@@ -35,18 +40,33 @@ export default function CreateOrder() {
   const [productSkuInput, setProductSkuInput] = useState('');
   const [addError, setAddError] = useState('');
 
+  // Инициализация карты (только один раз!)
   useEffect(() => {
+    if (mapRef.current || window._createMapCreating) return;
+    window._createMapCreating = true;
+    
     loadYandexMaps().then((ymaps) => {
       ymapsRef.current = ymaps;
+      
+      // Очищаем контейнер от старых карт
+      const container = document.getElementById('map');
+      if (container) {
+        container.innerHTML = '';
+      }
+      
       const newMap = new ymaps.Map('map', {
         center: [43.2567, 76.9286],
         zoom: 12,
         controls: ['zoomControl', 'fullscreenControl']
       });
       newMap.controls.add('trafficControl');
-      setMap(newMap);
       mapRef.current = newMap;
-    }).catch(err => console.error('Ошибка загрузки карты:', err));
+      
+      window._createMapCreating = false;
+    }).catch(err => {
+      console.error('Ошибка загрузки карты:', err);
+      window._createMapCreating = false;
+    });
   }, []);
 
   const confirmAddress = async (type: 'from' | 'to') => {
@@ -60,29 +80,31 @@ export default function CreateOrder() {
       alert('Адрес не найден. Попробуйте уточнить.');
       return;
     }
+    const currentMap = mapRef.current;
+    const ymaps = ymapsRef.current;
+    if (!currentMap || !ymaps) return;
+
     if (type === 'from') {
       setFromCoords([coords.lat, coords.lng]);
       setFromConfirmed(true);
-      if (map) {
-        map.panTo([coords.lat, coords.lng]);
-        map.geoObjects.removeAll();
-        map.geoObjects.add(new ymapsRef.current.Placemark([coords.lat, coords.lng], { balloonContent: 'Склад' }));
-      }
+      currentMap.panTo([coords.lat, coords.lng]);
+      currentMap.geoObjects.removeAll();
+      currentMap.geoObjects.add(new ymaps.Placemark([coords.lat, coords.lng], { balloonContent: 'Склад' }));
       const info = await getWeatherInfo(coords.lat, coords.lng);
       setWeatherInfo(info);
     } else {
       setToCoords([coords.lat, coords.lng]);
       setToConfirmed(true);
-      if (map && fromCoords) {
-        map.panTo([coords.lat, coords.lng]);
-        map.geoObjects.add(new ymapsRef.current.Placemark([coords.lat, coords.lng], { balloonContent: 'Получатель' }));
-        const multiRoute = new ymapsRef.current.multiRouter.MultiRoute({
+      if (fromCoords) {
+        currentMap.panTo([coords.lat, coords.lng]);
+        currentMap.geoObjects.add(new ymaps.Placemark([coords.lat, coords.lng], { balloonContent: 'Получатель' }));
+        const multiRoute = new ymaps.multiRouter.MultiRoute({
           referencePoints: [fromCoords, [coords.lat, coords.lng]],
           params: { routingMode: 'auto' }
         });
-        map.geoObjects.add(multiRoute);
-      } else if (map && !fromCoords) {
-        map.geoObjects.add(new ymapsRef.current.Placemark([coords.lat, coords.lng], { balloonContent: 'Получатель' }));
+        currentMap.geoObjects.add(multiRoute);
+      } else {
+        currentMap.geoObjects.add(new ymaps.Placemark([coords.lat, coords.lng], { balloonContent: 'Получатель' }));
       }
     }
   };

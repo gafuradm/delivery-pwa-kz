@@ -6,6 +6,12 @@ import VideoCall from '../../components/VideoCall';
 import SignatureCanvas from 'react-signature-canvas';
 import Receipt from '../../components/Receipt';
 
+declare global {
+  interface Window {
+    _trackMapCreating?: boolean;
+  }
+}
+
 export default function TrackOrder() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -14,7 +20,9 @@ export default function TrackOrder() {
   const [courierLocation, setCourierLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [accessDenied, setAccessDenied] = useState(false);
   const mapRef = useRef<any>(null);
+  const routeRef = useRef<any>(null);
   const courierMarkerRef = useRef<any>(null);
+  const ymapsRef = useRef<any>(null);
   const [showCall, setShowCall] = useState(false);
   const [callRoom, setCallRoom] = useState('');
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -23,6 +31,7 @@ export default function TrackOrder() {
   const [showReceipt, setShowReceipt] = useState(false);
   const [deliveredOrder, setDeliveredOrder] = useState<any>(null);
 
+  // Загрузка заказа и проверка доступа
   useEffect(() => {
     if (!id) return;
     const fetchOrder = async () => {
@@ -46,9 +55,15 @@ export default function TrackOrder() {
     fetchOrder();
   }, [id, navigate]);
 
+  // Подписка на геолокацию курьера
   useEffect(() => {
     if (!order?.courier_id) return;
-    const channel = supabase.channel(`courier-${order.courier_id}`).on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'courier_locations', filter: `courier_id=eq.${order.courier_id}` }, (payload) => {
+    const channel = supabase.channel(`courier-${order.courier_id}`).on('postgres_changes', { 
+      event: 'UPDATE', 
+      schema: 'public', 
+      table: 'courier_locations', 
+      filter: `courier_id=eq.${order.courier_id}` 
+    }, (payload) => {
       const newLoc = payload.new as { lat: number; lng: number };
       setCourierLocation({ lat: newLoc.lat, lng: newLoc.lng });
       if (mapRef.current && courierMarkerRef.current) {
@@ -56,44 +71,91 @@ export default function TrackOrder() {
         mapRef.current.panTo([newLoc.lat, newLoc.lng]);
       }
     }).subscribe();
-    supabase.from('courier_locations').select('lat, lng').eq('courier_id', order.courier_id).single().then(({ data }) => { if (data) setCourierLocation({ lat: data.lat, lng: data.lng }); });
+    supabase.from('courier_locations').select('lat, lng').eq('courier_id', order.courier_id).single().then(({ data }) => { 
+      if (data) setCourierLocation({ lat: data.lat, lng: data.lng }); 
+    });
     return () => { supabase.removeChannel(channel); };
   }, [order?.courier_id]);
 
+  // Инициализация карты (только один раз!)
   useEffect(() => {
     if (!order) return;
+    if (mapRef.current || window._trackMapCreating) return;
+    window._trackMapCreating = true;
+    
     loadYandexMaps().then((ymaps) => {
+      ymapsRef.current = ymaps;
+      
+      // Очищаем контейнер от старых карт
+      const container = document.getElementById('track-map');
+      if (container) {
+        container.innerHTML = '';
+      }
+      
       const match = order.from_coords.match(/\(([^,]+),([^)]+)\)/);
       const matchTo = order.to_coords.match(/\(([^,]+),([^)]+)\)/);
-      if (!match || !matchTo) return;
+      if (!match || !matchTo) {
+        window._trackMapCreating = false;
+        return;
+      }
+      
       const fromCoords = [parseFloat(match[1]), parseFloat(match[2])];
       const toCoords = [parseFloat(matchTo[1]), parseFloat(matchTo[2])];
-      const map = new ymaps.Map('track-map', { center: fromCoords, zoom: 12, controls: ['zoomControl', 'fullscreenControl'] });
+      
+      const map = new ymaps.Map('track-map', { 
+        center: fromCoords, 
+        zoom: 12, 
+        controls: ['zoomControl', 'fullscreenControl'] 
+      });
       map.controls.add('trafficControl');
       mapRef.current = map;
-      map.geoObjects.add(new ymaps.Placemark(fromCoords, { balloonContent: 'Склад' }));
-      map.geoObjects.add(new ymaps.Placemark(toCoords, { balloonContent: 'Получатель' }));
-      const multiRoute = new ymaps.multiRouter.MultiRoute({ referencePoints: [fromCoords, toCoords], params: { routingMode: 'auto' } });
+      
+      // Добавляем метки склада и получателя
+      map.geoObjects.add(new ymaps.Placemark(fromCoords, { balloonContent: '📦 Склад' }));
+      map.geoObjects.add(new ymaps.Placemark(toCoords, { balloonContent: '🏠 Получатель' }));
+      
+      // Добавляем маршрут
+      const multiRoute = new ymaps.multiRouter.MultiRoute({ 
+        referencePoints: [fromCoords, toCoords], 
+        params: { routingMode: 'auto' } 
+      });
       map.geoObjects.add(multiRoute);
+      routeRef.current = multiRoute;
+      
+      // Добавляем метку курьера, если есть
       if (courierLocation) {
-        const marker = new ymaps.Placemark([courierLocation.lat, courierLocation.lng], { balloonContent: '🚚 Курьер' }, { preset: 'islands#blueCarIcon' });
+        const marker = new ymaps.Placemark([courierLocation.lat, courierLocation.lng], 
+          { balloonContent: '🚚 Курьер' }, 
+          { preset: 'islands#blueCarIcon' }
+        );
         map.geoObjects.add(marker);
         courierMarkerRef.current = marker;
       } else if (order.courier_id) {
-        const marker = new ymaps.Placemark([0, 0], { balloonContent: '🚚 Курьер' }, { preset: 'islands#blueCarIcon' });
+        const marker = new ymaps.Placemark([0, 0], 
+          { balloonContent: '🚚 Курьер' }, 
+          { preset: 'islands#blueCarIcon' }
+        );
         map.geoObjects.add(marker);
         courierMarkerRef.current = marker;
       }
+      
+      window._trackMapCreating = false;
+    }).catch(err => {
+      console.error('Ошибка загрузки карты:', err);
+      window._trackMapCreating = false;
     });
   }, [order]);
 
+  // Обновление метки курьера на карте
   useEffect(() => {
     if (mapRef.current && courierLocation && courierMarkerRef.current) {
       courierMarkerRef.current.geometry.setCoordinates([courierLocation.lat, courierLocation.lng]);
       mapRef.current.panTo([courierLocation.lat, courierLocation.lng]);
-    } else if (mapRef.current && courierLocation && !courierMarkerRef.current) {
-      const ymaps = (window as any).ymaps;
-      const marker = new ymaps.Placemark([courierLocation.lat, courierLocation.lng], { balloonContent: '🚚 Курьер' }, { preset: 'islands#blueCarIcon' });
+    } else if (mapRef.current && courierLocation && !courierMarkerRef.current && ymapsRef.current) {
+      const marker = new ymapsRef.current.Placemark([courierLocation.lat, courierLocation.lng], 
+        { balloonContent: '🚚 Курьер' }, 
+        { preset: 'islands#blueCarIcon' }
+      );
       mapRef.current.geoObjects.add(marker);
       courierMarkerRef.current = marker;
     }
@@ -115,9 +177,16 @@ export default function TrackOrder() {
       return;
     }
     const { data: sigPublic } = supabase.storage.from('delivery').getPublicUrl(signaturePath);
-    const { error } = await supabase.from('orders').update({ status: 'delivered', client_signature_url: sigPublic.publicUrl }).eq('id', order.id);
+    const { error } = await supabase.from('orders').update({ 
+      status: 'delivered', 
+      client_signature_url: sigPublic.publicUrl 
+    }).eq('id', order.id);
     if (!error) {
-      await supabase.from('order_events').insert({ order_id: order.id, status: 'delivered', message: 'Клиент подтвердил получение' });
+      await supabase.from('order_events').insert({ 
+        order_id: order.id, 
+        status: 'delivered', 
+        message: 'Клиент подтвердил получение' 
+      });
       const { data: updatedOrder } = await supabase.from('orders').select('*').eq('id', order.id).single();
       setDeliveredOrder(updatedOrder);
       setShowReceipt(true);

@@ -1,13 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabaseClient';
-import { getRouteDistance } from '../../lib/yandexMaps';
+import { loadYandexMaps, getRouteDistance } from '../../lib/yandexMaps';
 import DeliveryConfirmationModal from '../../components/DeliveryConfirmationModal';
 import Receipt from '../../components/Receipt';
 import VideoCall from '../../components/VideoCall';
 import { cacheOrder, getCachedOrders, addOfflineAction, getOfflineActions, clearOfflineActions } from '../../lib/db';
 import VoiceAssistant from '../../components/VoiceAssistant';
 import LanguageSwitcher from '../../components/LanguageSwitcher';
+
+declare global {
+  interface Window {
+    _mapCreating?: boolean;
+  }
+}
 
 interface Order {
   id: string;
@@ -33,11 +39,17 @@ interface Point {
   lng: number;
 }
 
+// Универсальный парсинг координат
+const parseCoords = (coordStr: string): { lat: number; lng: number } => {
+  const cleaned = coordStr.replace(/[()]/g, '');
+  const [lat, lng] = cleaned.split(',').map(Number);
+  return { lat, lng };
+};
+
 export default function Tasks() {
   const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
-  const [optimizing, setOptimizing] = useState(false);
   const [optimizedSequence, setOptimizedSequence] = useState<Point[]>([]);
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [watchId, setWatchId] = useState<number | null>(null);
@@ -51,7 +63,15 @@ export default function Tasks() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [profile, setProfile] = useState<{ rating: number }>({ rating: 5 });
   const [voiceLang, setVoiceLang] = useState<'ru' | 'kk'>('ru');
+  
+  // Refs для карты (только одна карта!)
+  const mapRef = useRef<any>(null);
+  const ymapsRef = useRef<any>(null);
+  const routeRef = useRef<any>(null);
+  const markersRef = useRef<any[]>([]);
+  const courierMarkerRef = useRef<any>(null);
 
+  // Загрузка профиля
   useEffect(() => {
     const fetchProfile = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -63,6 +83,7 @@ export default function Tasks() {
     fetchProfile();
   }, []);
 
+  // Загрузка заказов
   const loadOrders = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -83,6 +104,171 @@ export default function Tasks() {
     }
   };
 
+  // Оптимизация маршрута (эвристика ближайшего соседа)
+  const optimizeRouteAsync = async (location: { lat: number; lng: number }, ordersList: Order[]) => {
+    if (ordersList.length === 0) return [];
+    
+    const points: Point[] = [];
+    for (const order of ordersList) {
+      const from = parseCoords(order.from_coords);
+      const to = parseCoords(order.to_coords);
+      points.push({
+        id: `${order.id}_pickup`,
+        orderId: order.id,
+        type: 'pickup',
+        address: order.from_address,
+        lat: from.lat,
+        lng: from.lng
+      });
+      points.push({
+        id: `${order.id}_delivery`,
+        orderId: order.id,
+        type: 'delivery',
+        address: order.to_address,
+        lat: to.lat,
+        lng: to.lng
+      });
+    }
+
+    const unvisited = [...points];
+    const sequence: Point[] = [];
+    let current = location;
+    
+    while (unvisited.length > 0) {
+      let bestIdx = 0;
+      let bestDist = Infinity;
+      for (let i = 0; i < unvisited.length; i++) {
+        const dist = Math.hypot(current.lat - unvisited[i].lat, current.lng - unvisited[i].lng);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestIdx = i;
+        }
+      }
+      const next = unvisited[bestIdx];
+      sequence.push(next);
+      current = { lat: next.lat, lng: next.lng };
+      unvisited.splice(bestIdx, 1);
+    }
+    
+    return sequence;
+  };
+
+  // Построение маршрута на карте
+  const buildRouteOnMap = async (ymaps: any, map: any, points: Point[]) => {
+    if (!map || !ymaps || points.length < 2) return;
+    
+    if (routeRef.current) {
+      map.geoObjects.remove(routeRef.current);
+    }
+    
+    const coords = points.map(p => [p.lat, p.lng]);
+    
+    const multiRoute = new ymaps.multiRouter.MultiRoute({
+      referencePoints: coords,
+      params: { routingMode: 'auto' }
+    });
+    
+    map.geoObjects.add(multiRoute);
+    routeRef.current = multiRoute;
+    
+    if (coords.length > 0) {
+      map.setBounds(multiRoute.getBounds(), { checkZoomRange: true });
+    }
+  };
+
+  // Создание меток на карте
+  const updateMarkers = (ymaps: any, map: any, points: Point[]) => {
+    if (!map || !ymaps) return;
+    
+    markersRef.current.forEach(marker => map.geoObjects.remove(marker));
+    markersRef.current = [];
+    
+    points.forEach(point => {
+      const color = point.type === 'pickup' ? '#10b981' : '#ef4444';
+      const icon = point.type === 'pickup' ? '📦' : '🏠';
+      const marker = new ymaps.Placemark([point.lat, point.lng], {
+        balloonContent: `${icon} ${point.address}`,
+        hintContent: point.type === 'pickup' ? 'Склад' : 'Клиент'
+      }, {
+        preset: 'islands#circleIcon',
+        iconColor: color
+      });
+      map.geoObjects.add(marker);
+      markersRef.current.push(marker);
+    });
+  };
+
+  // Инициализация карты (только один раз!)
+  useEffect(() => {
+    if (mapRef.current || window._mapCreating) return;
+    window._mapCreating = true;
+    
+    loadYandexMaps().then((ym) => {
+      ymapsRef.current = ym;
+      
+      // Очищаем контейнер от старых карт
+      const container = document.getElementById('courier-map');
+      if (container) {
+        container.innerHTML = '';
+      }
+      
+      const newMap = new ym.Map('courier-map', {
+        center: currentLocation ? [currentLocation.lat, currentLocation.lng] : [43.2567, 76.9286],
+        zoom: 12,
+        controls: ['zoomControl', 'fullscreenControl']
+      });
+      newMap.controls.add('trafficControl');
+      mapRef.current = newMap;
+      
+      if (currentLocation) {
+        const marker = new ym.Placemark([currentLocation.lat, currentLocation.lng], {
+          balloonContent: '🚚 Вы здесь'
+        }, { preset: 'islands#blueCarIcon' });
+        newMap.geoObjects.add(marker);
+        courierMarkerRef.current = marker;
+      }
+      
+      window._mapCreating = false;
+    }).catch(err => {
+      console.error('Ошибка загрузки карты:', err);
+      window._mapCreating = false;
+    });
+  }, []);
+
+  // Обновление метки курьера
+  useEffect(() => {
+    if (mapRef.current && ymapsRef.current && currentLocation) {
+      if (courierMarkerRef.current) {
+        courierMarkerRef.current.geometry.setCoordinates([currentLocation.lat, currentLocation.lng]);
+      } else {
+        const marker = new ymapsRef.current.Placemark([currentLocation.lat, currentLocation.lng], {
+          balloonContent: '🚚 Вы здесь'
+        }, { preset: 'islands#blueCarIcon' });
+        mapRef.current.geoObjects.add(marker);
+        courierMarkerRef.current = marker;
+      }
+    }
+  }, [currentLocation]);
+
+  // Оптимизация маршрута при изменении заказов или местоположения
+  useEffect(() => {
+    if (currentLocation && orders.length > 0) {
+      optimizeRouteAsync(currentLocation, orders).then(sequence => {
+        setOptimizedSequence(sequence);
+        if (mapRef.current && ymapsRef.current && sequence.length > 0) {
+          updateMarkers(ymapsRef.current, mapRef.current, sequence);
+          buildRouteOnMap(ymapsRef.current, mapRef.current, sequence);
+        }
+      });
+    } else if (orders.length === 0 && mapRef.current && ymapsRef.current) {
+      markersRef.current.forEach(m => mapRef.current.geoObjects.remove(m));
+      markersRef.current = [];
+      if (routeRef.current) mapRef.current.geoObjects.remove(routeRef.current);
+      setOptimizedSequence([]);
+    }
+  }, [orders, currentLocation]);
+
+  // Синхронизация офлайн-действий
   useEffect(() => {
     const syncOfflineActions = async () => {
       const actions = await getOfflineActions();
@@ -100,6 +286,7 @@ export default function Tasks() {
     if (isOnline) syncOfflineActions();
   }, [isOnline]);
 
+  // Слушаем изменения сети
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -120,6 +307,7 @@ export default function Tasks() {
     return () => { supabase.removeChannel(channel); };
   }, [isOnline]);
 
+  // Геолокация курьера
   useEffect(() => {
     const startGeo = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -145,109 +333,6 @@ export default function Tasks() {
     return () => { if (watchId) navigator.geolocation.clearWatch(watchId); };
   }, []);
 
-  const parseCoords = (coordStr: string): { lat: number; lng: number } => {
-    const match = coordStr.match(/\(([^,]+),([^)]+)\)/);
-    if (!match) return { lat: 0, lng: 0 };
-    return { lat: parseFloat(match[1]), lng: parseFloat(match[2]) };
-  };
-
-  const optimizeRoute = async () => {
-    if (orders.length === 0) {
-      alert('Нет активных заказов');
-      return;
-    }
-    if (!currentLocation) {
-      alert('Не удалось определить ваше местоположение. Включите геолокацию.');
-      return;
-    }
-    setOptimizing(true);
-
-    const points: Point[] = [];
-    for (const order of orders) {
-      const from = parseCoords(order.from_coords);
-      const to = parseCoords(order.to_coords);
-      points.push({
-        id: `${order.id}_pickup`,
-        orderId: order.id,
-        type: 'pickup',
-        address: order.from_address,
-        lat: from.lat,
-        lng: from.lng
-      });
-      points.push({
-        id: `${order.id}_delivery`,
-        orderId: order.id,
-        type: 'delivery',
-        address: order.to_address,
-        lat: to.lat,
-        lng: to.lng
-      });
-    }
-
-    const allPoints = [currentLocation, ...points.map(p => ({ lat: p.lat, lng: p.lng }))];
-    const n = allPoints.length;
-    const distMatrix: number[][] = Array(n).fill(null).map(() => Array(n).fill(0));
-    
-    for (let i = 0; i < n; i++) {
-      for (let j = i + 1; j < n; j++) {
-        const route = await getRouteDistance(
-          [allPoints[i].lat, allPoints[i].lng],
-          [allPoints[j].lat, allPoints[j].lng]
-        );
-        const duration = route?.duration || 0;
-        distMatrix[i][j] = duration;
-        distMatrix[j][i] = duration;
-      }
-    }
-
-    const orderIndices = orders.map((_, idx) => idx);
-    const permutations = permute(orderIndices);
-    let bestTime = Infinity;
-    let bestPermutation: number[] = [];
-
-    for (const perm of permutations) {
-      let totalTime = 0;
-      let prevIdx = 0;
-      for (const orderIdx of perm) {
-        const pickupIdx = 1 + orderIdx * 2;
-        const deliveryIdx = pickupIdx + 1;
-        totalTime += distMatrix[prevIdx][pickupIdx];
-        totalTime += distMatrix[pickupIdx][deliveryIdx];
-        prevIdx = deliveryIdx;
-      }
-      if (totalTime < bestTime) {
-        bestTime = totalTime;
-        bestPermutation = perm;
-      }
-    }
-
-    const sequence: Point[] = [];
-    for (const orderIdx of bestPermutation) {
-      sequence.push(points[orderIdx * 2]);
-      sequence.push(points[orderIdx * 2 + 1]);
-    }
-    setOptimizedSequence(sequence);
-    setOptimizing(false);
-    alert(`Маршрут оптимизирован! Общее время: ${Math.round(bestTime / 60)} минут.`);
-  };
-
-  const permute = (arr: number[]): number[][] => {
-    if (arr.length <= 1) return [arr];
-    const result: number[][] = [];
-    for (let i = 0; i < arr.length; i++) {
-      const rest = [...arr.slice(0, i), ...arr.slice(i + 1)];
-      const perms = permute(rest);
-      for (const perm of perms) {
-        result.push([arr[i], ...perm]);
-      }
-    }
-    return result;
-  };
-
-  const navigateTo = (address: string) => {
-    window.open(`https://yandex.ru/maps/?mode=routes&rtext=${encodeURIComponent(address)}`, '_blank');
-  };
-
   const updateStatus = async (orderId: string, newStatus: string) => {
     setLoading(true);
     if (isOnline) {
@@ -256,7 +341,6 @@ export default function Tasks() {
         await supabase.from('order_events').insert({ order_id: orderId, status: newStatus, message: `Статус изменён на ${newStatus}` });
         await cacheOrder({ ...orders.find(o => o.id === orderId), status: newStatus });
         await loadOrders();
-        if (newStatus === 'delivered') setOptimizedSequence(prev => prev.filter(p => p.orderId !== orderId));
       } else {
         alert('Ошибка: ' + error.message);
       }
@@ -302,21 +386,12 @@ export default function Tasks() {
 
   const handleVoiceCommand = (command: string) => {
     switch (command) {
-      case 'profile':
-        navigate('/profile');
-        break;
-      case 'logout':
-        supabase.auth.signOut().then(() => navigate('/'));
-        break;
-      case 'optimize':
-        optimizeRoute();
-        break;
-      case 'refresh':
-        loadOrders();
-        break;
+      case 'profile': navigate('/profile'); break;
+      case 'logout': supabase.auth.signOut().then(() => navigate('/')); break;
+      case 'refresh': loadOrders(); break;
       case 'accept-order':
         if (orders.length > 0 && orders[0].status === 'pending') updateStatus(orders[0].id, 'accepted');
-        else alert('Нет доступных заказов для принятия');
+        else alert('Нет доступных заказов');
         break;
       case 'picked-up':
         if (orders.length > 0 && orders[0].status === 'accepted') updateStatus(orders[0].id, 'picked_up');
@@ -333,10 +408,10 @@ export default function Tasks() {
         } else alert('Нет заказов в пути');
         break;
       case 'navigate-to-warehouse':
-        if (orders.length > 0) navigateTo(orders[0].from_address);
+        if (orders.length > 0) window.open(`https://yandex.ru/maps/?mode=routes&rtext=${encodeURIComponent(orders[0].from_address)}`, '_blank');
         break;
       case 'navigate-to-client':
-        if (orders.length > 0) navigateTo(orders[0].to_address);
+        if (orders.length > 0) window.open(`https://yandex.ru/maps/?mode=routes&rtext=${encodeURIComponent(orders[0].to_address)}`, '_blank');
         break;
       case 'call-client':
         if (orders.length > 0) startCall(`${orders[0].id}-client`, 'Курьер');
@@ -350,12 +425,7 @@ export default function Tasks() {
       case 'my-rating':
         alert(`Ваш рейтинг: ${profile.rating.toFixed(1)}`);
         break;
-      case 'earnings':
-        const todayEarnings = orders.filter(o => o.status === 'delivered').reduce((sum, o) => sum + (o.price || 0), 0);
-        alert(`За сегодня вы заработали ${todayEarnings} тенге`);
-        break;
-      default:
-        break;
+      default: break;
     }
   };
 
@@ -365,47 +435,29 @@ export default function Tasks() {
 
   return (
     <div className="container">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1>Мои задания</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>⭐ Рейтинг: {rating.toFixed(1)}</div>
       </div>
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
-        <button onClick={loadOrders} className="btn-primary">🔄 Обновить</button>
-        <button onClick={optimizeRoute} disabled={optimizing} className="btn-primary" style={{ background: '#10b981' }}>
-          {optimizing ? 'Оптимизация...' : '✨ Оптимизировать маршрут'}
-        </button>
+      
+      <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+        <button onClick={loadOrders} className="btn-primary" disabled={loading}>🔄 Обновить</button>
+        {!isOnline && <span className="btn-secondary" style={{ background: '#fee2e2' }}>⚠️ Офлайн-режим</span>}
       </div>
-      {!isOnline && <div className="card" style={{ background: '#fee2e2', marginBottom: 10 }}>⚠️ Офлайн-режим. Действия будут синхронизированы позже.</div>}
 
-      {optimizedSequence.length > 0 && (
-        <div className="card" style={{ marginBottom: 20, overflowX: 'auto' }}>
-          <h3>📌 Оптимальный порядок маршрута</h3>
-          <ol style={{ paddingLeft: '1.5rem', margin: 0 }}>
-            {optimizedSequence.map((point, idx) => (
-              <li key={point.id} style={{ marginBottom: 8, wordBreak: 'break-word' }}>
-                {point.type === 'pickup' ? '📦 Забрать со склада:' : '🏠 Доставить клиенту:'}
-                <strong> {point.address}</strong>
-                <button onClick={() => navigateTo(point.address)} className="btn-secondary" style={{ marginLeft: 10, padding: '4px 8px', fontSize: '0.8rem' }}>
-                  🗺️ Проложить маршрут
-                </button>
-              </li>
-            ))}
-          </ol>
-        </div>
-      )}
+      <div id="courier-map" style={{ width: '100%', height: '500px', borderRadius: 'var(--radius)', marginBottom: 20 }}></div>
 
       {orders.map(order => (
         <div key={order.id} className="card" style={{ marginBottom: 10 }}>
           <p><strong>Заказ #{order.id.slice(0, 8)}</strong></p>
-          <p>Откуда: {order.from_address}</p>
-          <p>Куда: {order.to_address}</p>
-          <p>Вес: {order.weight_kg} кг | Хрупкий: {order.fragile ? 'Да' : 'Нет'}</p>
-          <p>Статус: {order.status}</p>
+          <p>📦 Откуда: {order.from_address}</p>
+          <p>🎯 Куда: {order.to_address}</p>
+          <p>⚖️ Вес: {order.weight_kg} кг | 💔 Хрупкий: {order.fragile ? 'Да' : 'Нет'}</p>
+          <p>📌 Статус: {order.status}</p>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
             <button onClick={() => updateStatus(order.id, 'accepted')} disabled={loading} className="btn-primary">✅ Принять</button>
             <button onClick={() => updateStatus(order.id, 'picked_up')} disabled={loading} className="btn-primary" style={{ background: '#f59e0b' }}>📦 Забрал</button>
             <button onClick={() => updateStatus(order.id, 'in_transit')} disabled={loading} className="btn-primary" style={{ background: '#3b82f6' }}>🚗 В пути</button>
-            <button onClick={() => { setCurrentOrderId(order.id); setShowDeliveryModal(true); }} disabled={loading} className="btn-primary" style={{ background: '#10b981' }}>🏠 Доставить (с фото и подписью)</button>
+            <button onClick={() => { setCurrentOrderId(order.id); setShowDeliveryModal(true); }} disabled={loading} className="btn-primary" style={{ background: '#10b981' }}>🏠 Доставить</button>
             <button onClick={() => startCall(`${order.id}-client`, 'Курьер')} className="btn-primary" style={{ background: '#6c757d' }}>📞 Позвонить клиенту</button>
           </div>
         </div>

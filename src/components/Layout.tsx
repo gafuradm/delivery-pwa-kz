@@ -6,7 +6,7 @@ import { useTheme } from '../context/ThemeContext';
 interface LayoutProps {
   children: React.ReactNode;
   title?: string;
-  role?: 'client' | 'courier' | 'dispatcher' | 'collector';
+  role?: 'client' | 'courier' | 'dispatcher' | 'collector' | 'crane_operator';
 }
 
 export default function Layout({ children, title, role }: LayoutProps) {
@@ -30,8 +30,12 @@ export default function Layout({ children, title, role }: LayoutProps) {
     } else if (role === 'dispatcher') {
       links.push({ to: '/', label: 'Заказы', icon: '📦' });
       links.push({ to: '/analytics', label: 'Аналитика', icon: '📊' });
+      links.push({ to: '/warehouses', label: 'Склады', icon: '🏭' });
+      links.push({ to: '/containers', label: 'Контейнеры', icon: '📦' });
     } else if (role === 'collector') {
       links.push({ to: '/', label: 'Задания', icon: '📦' });
+    } else if (role === 'crane_operator') {
+      links.push({ to: '/', label: 'Размещение контейнеров', icon: '🏗️' });
     }
     links.push({ to: '/profile', label: 'Профиль', icon: '👤' });
     return links;

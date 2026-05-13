@@ -8,10 +8,13 @@ import TrackOrder from './pages/Client/TrackOrder';
 import MyOrders from './pages/Client/MyOrders';
 import Tasks from './pages/Courier/Tasks';
 import Dashboard from './pages/Dispatcher/Dashboard';
-import Analytics from './pages/Dispatcher/Analytics'; // убедитесь, что импорт есть
+import Analytics from './pages/Dispatcher/Analytics';
 import CollectorTasks from './pages/Collector/Tasks';
 import Profile from './pages/Profile';
 import Layout from './components/Layout';
+import Warehouses from './pages/Dispatcher/Warehouses';
+import Containers from './pages/Dispatcher/Containers';
+import CraneTasks from './pages/CraneOperator/Tasks';
 
 function AppContent() {
   const [session, setSession] = useState<any>(null);
@@ -65,6 +68,8 @@ function AppContent() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/analytics" element={<Analytics />} />
+          <Route path="/warehouses" element={<Warehouses />} />
+          <Route path="/containers" element={<Containers />} />
           {commonRoutes}
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
@@ -77,6 +82,18 @@ function AppContent() {
       <Layout role="collector" title="Сборщик заказов">
         <Routes>
           <Route path="/" element={<CollectorTasks />} />
+          {commonRoutes}
+          <Route path="*" element={<Navigate to="/" />} />
+        </Routes>
+      </Layout>
+    </BrowserRouter>
+  );
+
+  if (role === 'crane_operator') return (
+    <BrowserRouter>
+      <Layout role="crane_operator" title="Размещение контейнеров">
+        <Routes>
+          <Route path="/" element={<CraneTasks />} />
           {commonRoutes}
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>

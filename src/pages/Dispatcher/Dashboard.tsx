@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import VideoCall from '../../components/VideoCall';
-import { Link } from 'react-router-dom';
+import LowStockAlert from '../../components/LowStockAlert';
 
 interface Order {
   id: string;
@@ -11,6 +11,7 @@ interface Order {
   price: number;
   status: string;
   courier_id?: string;
+  requires_large_vehicle?: boolean;
 }
 
 interface Courier {
@@ -23,11 +24,16 @@ interface Collector {
   full_name: string;
 }
 
+// Жёстко задаём ключи (временно, для обхода ошибки ImportMeta)
+const SUPABASE_URL = 'https://uchithtrlvtawritbxrh.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVjaGl0aHRybHZ0YXdyaXRieHJoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU1ODM2NzYsImV4cCI6MjA5MTE1OTY3Nn0.60QUNH2WH8X3fGqe3bBhAQgWZHQaMpoASXrj9LHL110';
+
 export default function Dashboard() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [couriers, setCouriers] = useState<Courier[]>([]);
   const [collectors, setCollectors] = useState<Collector[]>([]);
   const [loading, setLoading] = useState(false);
+  const [notifying, setNotifying] = useState(false);
   const [showCall, setShowCall] = useState(false);
   const [callRoom, setCallRoom] = useState('');
   const [callUserName, setCallUserName] = useState('');
@@ -105,14 +111,11 @@ export default function Dashboard() {
   const aiAssign = async (orderId: string, type: 'courier' | 'collector') => {
     setLoading(true);
     try {
-      const supabaseUrl = 'https://uchithtrlvtawritbxrh.supabase.co';
-      const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVjaGl0aHRybHZ0YXdyaXRieHJoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU1ODM2NzYsImV4cCI6MjA5MTE1OTY3Nn0.60QUNH2WH8X3fGqe3bBhAQgWZHQaMpoASXrj9LHL110';
-
-      const response = await fetch(`${supabaseUrl}/functions/v1/autoAssign`, {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/autoAssign`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabaseAnonKey}`,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
         },
         body: JSON.stringify({ action: 'autoAssign', orderId, orderType: type }),
       });
@@ -128,6 +131,25 @@ export default function Dashboard() {
     }
     setLoading(false);
   };
+  /*
+  const checkStockAndNotify = async () => {
+    setNotifying(true);
+    try {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/checkStockAndNotify`, {
+        method: 'POST',
+        
+      });
+      const data = await response.json();
+      if (data.success) {
+        alert(`Уведомления отправлены (${data.sent} диспетчерам)`);
+      } else {
+        alert('Ошибка: ' + (data.error || 'Не удалось отправить уведомления'));
+      }
+    } catch (err) {
+      alert('Ошибка соединения с функцией уведомлений');
+    }
+    setNotifying(false);
+  };*/
 
   const startCall = (roomSuffix: string, userName: string) => {
     setCallRoom(`order-${roomSuffix}`);
@@ -145,12 +167,19 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="container">
-      <button onClick={loadData} className="btn-secondary" style={{ marginBottom: '1rem' }}>🔄 Обновить</button>
+    <>
+      <LowStockAlert />
+      
+      <div style={{ display: 'flex', gap: 10, marginBottom: '1rem', flexWrap: 'wrap' }}>
+        <button onClick={loadData} className="btn-secondary">🔄 Обновить</button>
+        
+      </div>
       
       {orders.map(order => (
-        <div key={order.id} style={{ background: statusColor[order.status] || 'white', padding: 15, margin: 10, borderRadius: 10, border: '1px solid #ddd' }}>
-          <p><strong>Заказ #{order.id.slice(0, 8)}</strong> | Статус: {order.status}</p>
+        <div key={order.id} className="card" style={{ background: statusColor[order.status] || 'white', marginBottom: '1rem' }}>
+          <p><strong>Заказ #{order.id.slice(0, 8)}</strong> | Статус: {order.status}
+            {order.requires_large_vehicle && <span style={{ color: 'var(--warning)', marginLeft: 10 }}>⚠️ Требуется большегрузная машина</span>}
+          </p>
           <p>{order.from_address} → {order.to_address}</p>
           <p>Вес: {order.weight_kg}кг | Цена: {order.price}₸</p>
           
@@ -159,32 +188,33 @@ export default function Dashboard() {
             {order.courier_id ? (
               <>
                 <p>✅ Курьер назначен: {order.courier_id.slice(0, 8)}</p>
-                <button onClick={() => startCall(`${order.id}-courier`, 'Диспетчер')} className="btn-primary" style={{ background: '#6c757d' }}>📞 Позвонить курьеру</button>
-                <button onClick={() => startCall(`${order.id}-client`, 'Диспетчер')} className="btn-primary" style={{ background: '#6c757d' }}>📞 Позвонить клиенту</button>
+                <button onClick={() => startCall(`${order.id}-courier`, 'Диспетчер')} className="btn-secondary">📞 Позвонить курьеру</button>
+                <button onClick={() => startCall(`${order.id}-client`, 'Диспетчер')} className="btn-secondary">📞 Позвонить клиенту</button>
               </>
             ) : (
               <>
-                <select onChange={(e) => assignCourier(order.id, e.target.value)} defaultValue="" disabled={loading}>
+                <select onChange={(e) => assignCourier(order.id, e.target.value)} defaultValue="" disabled={loading} className="btn-secondary">
                   <option value="" disabled>Назначить курьера</option>
                   {couriers.map(c => <option key={c.id} value={c.id}>{c.full_name || c.id.slice(0, 8)}</option>)}
                 </select>
-                <button onClick={() => aiAssign(order.id, 'courier')} className="btn-primary" style={{ background: '#8b5cf6' }} disabled={loading}>🤖 AI назначить курьера</button>
+                <button onClick={() => aiAssign(order.id, 'courier')} className="btn-primary" style={{ background: '#8b5cf6' }} disabled={loading}>🤖 AI</button>
               </>
             )}
 
             {/* Назначение сборщика */}
             {order.status === 'pending' && (
               <>
-                <select onChange={(e) => assignCollector(order.id, e.target.value)} defaultValue="" disabled={loading}>
+                <select onChange={(e) => assignCollector(order.id, e.target.value)} defaultValue="" disabled={loading} className="btn-secondary">
                   <option value="" disabled>Назначить сборщика</option>
                   {collectors.map(c => <option key={c.id} value={c.id}>{c.full_name || c.id.slice(0, 8)}</option>)}
                 </select>
-                <button onClick={() => aiAssign(order.id, 'collector')} className="btn-primary" style={{ background: '#8b5cf6' }} disabled={loading}>🤖 AI назначить сборщика</button>
+                <button onClick={() => aiAssign(order.id, 'collector')} className="btn-primary" style={{ background: '#8b5cf6' }} disabled={loading}>🤖 AI</button>
               </>
             )}
           </div>
         </div>
       ))}
+      {orders.length === 0 && <p>Нет заказов</p>}
       
       {showCall && (
         <VideoCall
@@ -193,6 +223,6 @@ export default function Dashboard() {
           onClose={() => setShowCall(false)}
         />
       )}
-    </div>
+    </>
   );
 }
