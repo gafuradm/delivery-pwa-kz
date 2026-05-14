@@ -1,0 +1,92 @@
+.
+├── .env
+├── .gitignore
+├── .vscode
+│   ├── extensions.json
+│   └── settings.json
+├── create-delivery-pwa.sh
+├── dist
+│   ├── assets
+│   │   ├── index-BmCjmWa3.css
+│   │   ├── index-DSSdqW59.js
+│   │   ├── index.es-BHl8Amgd.js
+│   │   └── purify.es-BgtpMKW3.js
+│   ├── icon-192.png
+│   ├── icon-512.png
+│   ├── index.html
+│   ├── manifest.json
+│   ├── manifest.webmanifest
+│   ├── registerSW.js
+│   ├── sw.js
+│   └── workbox-0b0dccde.js
+├── index.html
+├── package-lock.json
+├── package.json
+├── project_structure.txt
+├── public
+│   ├── icon-192.png
+│   ├── icon-512.png
+│   └── manifest.json
+├── src
+│   ├── App.tsx
+│   ├── components
+│   │   ├── DeliveryConfirmationModal.tsx
+│   │   ├── LanguageSwitcher.tsx
+│   │   ├── Layout.tsx
+│   │   ├── LowStockAlert.tsx
+│   │   ├── Receipt.tsx
+│   │   ├── VideoCall.tsx
+│   │   └── VoiceAssistant.tsx
+│   ├── context
+│   │   └── ThemeContext.tsx
+│   ├── index.css
+│   ├── lib
+│   │   ├── db.ts
+│   │   ├── supabaseClient.ts
+│   │   ├── weather.ts
+│   │   └── yandexMaps.ts
+│   ├── main.tsx
+│   └── pages
+│       ├── Auth.tsx
+│       ├── Client
+│       │   ├── CreateOrder.tsx
+│       │   ├── MyOrders.tsx
+│       │   └── TrackOrder.tsx
+│       ├── Collector
+│       │   └── Tasks.tsx
+│       ├── Common
+│       │   └── MyPerformance.tsx
+│       ├── Courier
+│       │   └── Tasks.tsx
+│       ├── CraneOperator
+│       │   └── Tasks.tsx
+│       ├── Dispatcher
+│       │   ├── Analytics.tsx
+│       │   ├── Containers.tsx
+│       │   ├── Dashboard.tsx
+│       │   ├── Users.tsx
+│       │   └── Warehouses.tsx
+│       └── Profile.tsx
+├── supabase
+│   ├── .temp
+│   │   ├── cli-latest
+│   │   ├── gotrue-version
+│   │   ├── pooler-url
+│   │   ├── postgres-version
+│   │   ├── project-ref
+│   │   ├── rest-version
+│   │   ├── storage-migration
+│   │   └── storage-version
+│   ├── config.toml
+│   └── functions
+│       ├── autoAssign
+│       │   ├── .npmrc
+│       │   ├── deno.json
+│       │   └── index.ts
+│       └── checkStockAndNotify
+│           └── index.ts
+├── tsconfig.json
+├── tsconfig.node.json
+└── vite.config.ts
+
+21 directories, 69 files

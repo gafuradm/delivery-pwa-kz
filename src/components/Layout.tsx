@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react'; // ← добавили useEffect
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useTheme } from '../context/ThemeContext';
@@ -14,6 +14,31 @@ export default function Layout({ children, title, role }: LayoutProps) {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // 🔽 НОВЫЙ КОД ДЛЯ PWA УСТАНОВКИ
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallButton, setShowInstallButton] = useState(false);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setShowInstallButton(true);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const installApp = () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then(() => {
+        setDeferredPrompt(null);
+        setShowInstallButton(false);
+      });
+    }
+  };
+  // 🔼 КОНЕЦ НОВОГО КОДА
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -53,6 +78,12 @@ export default function Layout({ children, title, role }: LayoutProps) {
             Delivery PWA
           </h1>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            {/* 🔽 НОВАЯ КНОПКА УСТАНОВКИ (появляется только на Android Chrome) */}
+            {showInstallButton && (
+              <button onClick={installApp} className="btn-primary" style={{ background: '#10b981', padding: '0.5rem' }}>
+                📲 Установить
+              </button>
+            )}
             <button onClick={toggleTheme} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: '2rem', padding: '0.5rem', cursor: 'pointer', fontSize: '1.2rem' }}>
               {theme === 'light' ? '🌙' : '☀️'}
             </button>
