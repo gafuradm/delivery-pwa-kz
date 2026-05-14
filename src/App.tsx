@@ -15,6 +15,7 @@ import Layout from './components/Layout';
 import Warehouses from './pages/Dispatcher/Warehouses';
 import Containers from './pages/Dispatcher/Containers';
 import CraneTasks from './pages/CraneOperator/Tasks';
+import Users from './pages/Dispatcher/Users';
 
 function AppContent() {
   const [session, setSession] = useState<any>(null);
@@ -70,6 +71,7 @@ function AppContent() {
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/warehouses" element={<Warehouses />} />
           <Route path="/containers" element={<Containers />} />
+          <Route path="/users" element={<Users />} />
           {commonRoutes}
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>

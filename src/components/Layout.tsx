@@ -32,6 +32,7 @@ export default function Layout({ children, title, role }: LayoutProps) {
       links.push({ to: '/analytics', label: 'Аналитика', icon: '📊' });
       links.push({ to: '/warehouses', label: 'Склады', icon: '🏭' });
       links.push({ to: '/containers', label: 'Контейнеры', icon: '📦' });
+      links.push({ to: '/users', label: 'Пользователи', icon: '👥' });
     } else if (role === 'collector') {
       links.push({ to: '/', label: 'Задания', icon: '📦' });
     } else if (role === 'crane_operator') {

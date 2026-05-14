@@ -1,13 +1,14 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabaseClient';
-import { loadYandexMaps, getRouteDistance } from '../../lib/yandexMaps';
+import { loadYandexMaps } from '../../lib/yandexMaps';
 import DeliveryConfirmationModal from '../../components/DeliveryConfirmationModal';
 import Receipt from '../../components/Receipt';
 import VideoCall from '../../components/VideoCall';
 import { cacheOrder, getCachedOrders, addOfflineAction, getOfflineActions, clearOfflineActions } from '../../lib/db';
 import VoiceAssistant from '../../components/VoiceAssistant';
 import LanguageSwitcher from '../../components/LanguageSwitcher';
+import { useTheme } from '../../context/ThemeContext';
 
 declare global {
   interface Window {
@@ -39,7 +40,6 @@ interface Point {
   lng: number;
 }
 
-// Универсальный парсинг координат
 const parseCoords = (coordStr: string): { lat: number; lng: number } => {
   const cleaned = coordStr.replace(/[()]/g, '');
   const [lat, lng] = cleaned.split(',').map(Number);
@@ -63,15 +63,20 @@ export default function Tasks() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [profile, setProfile] = useState<{ rating: number }>({ rating: 5 });
   const [voiceLang, setVoiceLang] = useState<'ru' | 'kk'>('ru');
-  
-  // Refs для карты (только одна карта!)
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const { theme, toggleTheme } = useTheme();
+
   const mapRef = useRef<any>(null);
   const ymapsRef = useRef<any>(null);
   const routeRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
   const courierMarkerRef = useRef<any>(null);
 
-  // Загрузка профиля
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
   useEffect(() => {
     const fetchProfile = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -83,17 +88,17 @@ export default function Tasks() {
     fetchProfile();
   }, []);
 
-  // Загрузка заказов
   const loadOrders = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
     if (isOnline) {
-      const { data: fresh } = await supabase
+      const { data: fresh, error } = await supabase
         .from('orders')
         .select('*')
         .eq('courier_id', user.id)
         .order('created_at', { ascending: false });
+      if (error) showToast('Ошибка загрузки заказов: ' + error.message, 'error');
       if (fresh) {
         setOrders(fresh);
         for (const order of fresh) await cacheOrder(order);
@@ -101,10 +106,10 @@ export default function Tasks() {
     } else {
       const cached = await getCachedOrders({ courierId: user.id });
       setOrders(cached);
+      showToast('📱 Офлайн-режим: показаны кэшированные заказы', 'success');
     }
   };
 
-  // Оптимизация маршрута (эвристика ближайшего соседа)
   const optimizeRouteAsync = async (location: { lat: number; lng: number }, ordersList: Order[]) => {
     if (ordersList.length === 0) return [];
     
@@ -153,7 +158,6 @@ export default function Tasks() {
     return sequence;
   };
 
-  // Построение маршрута на карте
   const buildRouteOnMap = async (ymaps: any, map: any, points: Point[]) => {
     if (!map || !ymaps || points.length < 2) return;
     
@@ -176,7 +180,6 @@ export default function Tasks() {
     }
   };
 
-  // Создание меток на карте
   const updateMarkers = (ymaps: any, map: any, points: Point[]) => {
     if (!map || !ymaps) return;
     
@@ -198,7 +201,6 @@ export default function Tasks() {
     });
   };
 
-  // Инициализация карты (только один раз!)
   useEffect(() => {
     if (mapRef.current || window._mapCreating) return;
     window._mapCreating = true;
@@ -206,7 +208,6 @@ export default function Tasks() {
     loadYandexMaps().then((ym) => {
       ymapsRef.current = ym;
       
-      // Очищаем контейнер от старых карт
       const container = document.getElementById('courier-map');
       if (container) {
         container.innerHTML = '';
@@ -235,7 +236,6 @@ export default function Tasks() {
     });
   }, []);
 
-  // Обновление метки курьера
   useEffect(() => {
     if (mapRef.current && ymapsRef.current && currentLocation) {
       if (courierMarkerRef.current) {
@@ -250,7 +250,6 @@ export default function Tasks() {
     }
   }, [currentLocation]);
 
-  // Оптимизация маршрута при изменении заказов или местоположения
   useEffect(() => {
     if (currentLocation && orders.length > 0) {
       optimizeRouteAsync(currentLocation, orders).then(sequence => {
@@ -268,7 +267,6 @@ export default function Tasks() {
     }
   }, [orders, currentLocation]);
 
-  // Синхронизация офлайн-действий
   useEffect(() => {
     const syncOfflineActions = async () => {
       const actions = await getOfflineActions();
@@ -286,10 +284,15 @@ export default function Tasks() {
     if (isOnline) syncOfflineActions();
   }, [isOnline]);
 
-  // Слушаем изменения сети
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
+    const handleOnline = () => {
+      setIsOnline(true);
+      showToast('✅ Восстановлено подключение к интернету', 'success');
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      showToast('⚠️ Нет подключения к интернету. Работаем офлайн.', 'error');
+    };
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     return () => {
@@ -307,7 +310,6 @@ export default function Tasks() {
     return () => { supabase.removeChannel(channel); };
   }, [isOnline]);
 
-  // Геолокация курьера
   useEffect(() => {
     const startGeo = async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -341,13 +343,14 @@ export default function Tasks() {
         await supabase.from('order_events').insert({ order_id: orderId, status: newStatus, message: `Статус изменён на ${newStatus}` });
         await cacheOrder({ ...orders.find(o => o.id === orderId), status: newStatus });
         await loadOrders();
+        showToast(`✅ Статус заказа обновлён на "${newStatus}"`, 'success');
       } else {
-        alert('Ошибка: ' + error.message);
+        showToast('Ошибка: ' + error.message, 'error');
       }
     } else {
       await addOfflineAction('updateStatus', { orderId, newStatus });
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
-      alert('Действие сохранено. Будет синхронизировано при подключении к интернету.');
+      showToast('📱 Действие сохранено. Будет синхронизировано при подключении к интернету.', 'success');
     }
     setLoading(false);
   };
@@ -371,8 +374,9 @@ export default function Tasks() {
       });
       await cacheOrder({ ...orders.find(o => o.id === currentOrderId), status: 'waiting_client_confirmation', photo_url: photoUrl, signature_url: signatureUrl });
       await loadOrders();
+      showToast('✅ Доставка подтверждена! Ожидайте подтверждения клиента.', 'success');
     } else {
-      alert('Ошибка: ' + error.message);
+      showToast('Ошибка: ' + error.message, 'error');
     }
     setShowDeliveryModal(false);
     setCurrentOrderId(null);
@@ -384,85 +388,393 @@ export default function Tasks() {
     setShowCall(true);
   };
 
+  // Функция для голосового ассистента
   const handleVoiceCommand = (command: string) => {
     switch (command) {
-      case 'profile': navigate('/profile'); break;
-      case 'logout': supabase.auth.signOut().then(() => navigate('/')); break;
-      case 'refresh': loadOrders(); break;
+      case 'profile':
+        navigate('/profile');
+        break;
+      case 'logout':
+        supabase.auth.signOut().then(() => navigate('/'));
+        break;
+      case 'refresh':
+        loadOrders();
+        break;
       case 'accept-order':
-        if (orders.length > 0 && orders[0].status === 'pending') updateStatus(orders[0].id, 'accepted');
-        else alert('Нет доступных заказов');
+        if (orders.length > 0 && orders[0].status === 'pending') {
+          updateStatus(orders[0].id, 'accepted');
+        } else {
+          showToast('Нет доступных заказов для принятия', 'error');
+        }
         break;
       case 'picked-up':
-        if (orders.length > 0 && orders[0].status === 'accepted') updateStatus(orders[0].id, 'picked_up');
-        else alert('Нет заказов в статусе "принят"');
+        if (orders.length > 0 && orders[0].status === 'accepted') {
+          updateStatus(orders[0].id, 'picked_up');
+        } else {
+          showToast('Нет заказов в статусе "принят"', 'error');
+        }
         break;
       case 'in-transit':
-        if (orders.length > 0 && orders[0].status === 'picked_up') updateStatus(orders[0].id, 'in_transit');
-        else alert('Нет заказов в статусе "забран"');
+        if (orders.length > 0 && orders[0].status === 'picked_up') {
+          updateStatus(orders[0].id, 'in_transit');
+        } else {
+          showToast('Нет заказов в статусе "забран"', 'error');
+        }
         break;
       case 'deliver':
         if (orders.length > 0 && orders[0].status === 'in_transit') {
           setCurrentOrderId(orders[0].id);
           setShowDeliveryModal(true);
-        } else alert('Нет заказов в пути');
+        } else {
+          showToast('Нет заказов в пути', 'error');
+        }
         break;
       case 'navigate-to-warehouse':
-        if (orders.length > 0) window.open(`https://yandex.ru/maps/?mode=routes&rtext=${encodeURIComponent(orders[0].from_address)}`, '_blank');
+        if (orders.length > 0) {
+          window.open(`https://yandex.ru/maps/?mode=routes&rtext=${encodeURIComponent(orders[0].from_address)}`, '_blank');
+        } else {
+          showToast('Нет активных заказов', 'error');
+        }
         break;
       case 'navigate-to-client':
-        if (orders.length > 0) window.open(`https://yandex.ru/maps/?mode=routes&rtext=${encodeURIComponent(orders[0].to_address)}`, '_blank');
+        if (orders.length > 0) {
+          window.open(`https://yandex.ru/maps/?mode=routes&rtext=${encodeURIComponent(orders[0].to_address)}`, '_blank');
+        } else {
+          showToast('Нет активных заказов', 'error');
+        }
         break;
       case 'call-client':
-        if (orders.length > 0) startCall(`${orders[0].id}-client`, 'Курьер');
+        if (orders.length > 0) {
+          startCall(`${orders[0].id}-client`, 'Курьер');
+        } else {
+          showToast('Нет активных заказов', 'error');
+        }
         break;
       case 'order-status':
-        alert(orders.map(o => `${o.id.slice(0,8)}: ${o.status}`).join('\n') || 'Нет активных заказов');
+        if (orders.length > 0) {
+          const statuses = orders.map(o => `${o.id.slice(0, 8)}: ${o.status}`).join('\n');
+          showToast(statuses, 'success');
+        } else {
+          showToast('Нет активных заказов', 'error');
+        }
         break;
       case 'order-count':
-        alert(`У вас ${orders.length} активных заказов`);
+        showToast(`У вас ${orders.length} активных заказов`, 'success');
         break;
       case 'my-rating':
-        alert(`Ваш рейтинг: ${profile.rating.toFixed(1)}`);
+        showToast(`Ваш рейтинг: ${profile.rating.toFixed(1)}`, 'success');
         break;
-      default: break;
+      default:
+        console.log('Неизвестная команда:', command);
     }
   };
 
-  const ordersCount = orders.length;
-  const rating = profile.rating;
-  const todayEarnings = orders.filter(o => o.status === 'delivered').reduce((sum, o) => sum + (o.price || 0), 0);
+  const getStatusInfo = (status: string) => {
+    const statusMap: Record<string, { label: string; color: string; icon: string }> = {
+      pending: { label: 'В ожидании', color: '#f59e0b', icon: '⏳' },
+      accepted: { label: 'Принят', color: '#3b82f6', icon: '✅' },
+      picked_up: { label: 'Забран', color: '#8b5cf6', icon: '📦' },
+      in_transit: { label: 'В пути', color: '#10b981', icon: '🚚' },
+      waiting_client_confirmation: { label: 'Ждёт подтверждения', color: '#ec4899', icon: '📋' },
+      delivered: { label: 'Доставлен', color: '#6b7280', icon: '🏁' }
+    };
+    return statusMap[status] || { label: status, color: '#6b7280', icon: '📋' };
+  };
+
+  const bgStyle = {
+    minHeight: '100vh',
+    background: theme === 'dark'
+      ? 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)'
+      : 'linear-gradient(135deg, #e0e7ff 0%, #f3e8ff 100%)',
+    padding: '2rem 1rem',
+    transition: 'background 0.3s ease',
+  };
+
+  const cardStyle = {
+    background: theme === 'dark'
+      ? 'rgba(30, 41, 59, 0.9)'
+      : 'rgba(255, 255, 255, 0.9)',
+    backdropFilter: 'blur(10px)',
+    borderRadius: '1.5rem',
+    padding: '1.5rem',
+    marginBottom: '1rem',
+    boxShadow: theme === 'dark'
+      ? '0 10px 15px -3px rgba(0, 0, 0, 0.3)'
+      : '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
+    border: theme === 'dark' ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(255,255,255,0.6)',
+    transition: 'all 0.3s ease',
+  };
+
+  const todayEarnings = orders
+    .filter(o => o.status === 'delivered')
+    .reduce((sum, o) => sum + (o.price || 0), 0);
 
   return (
-    <div className="container">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <div>⭐ Рейтинг: {rating.toFixed(1)}</div>
-      </div>
-      
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
-        <button onClick={loadOrders} className="btn-primary" disabled={loading}>🔄 Обновить</button>
-        {!isOnline && <span className="btn-secondary" style={{ background: '#fee2e2' }}>⚠️ Офлайн-режим</span>}
-      </div>
+    <div style={bgStyle}>
+      {/* Toast уведомление */}
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          top: '1.5rem',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 1000,
+          background: toast.type === 'success' ? '#10b981' : '#ef4444',
+          color: 'white',
+          padding: '0.75rem 1.5rem',
+          borderRadius: '9999px',
+          fontSize: '0.9rem',
+          fontWeight: 500,
+          boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
+          animation: 'fadeInDown 0.3s ease-out',
+        }}>
+          {toast.message}
+        </div>
+      )}
 
-      <div id="courier-map" style={{ width: '100%', height: '500px', borderRadius: 'var(--radius)', marginBottom: 20 }}></div>
+      {/* Кнопка темы */}
+      <button
+        onClick={toggleTheme}
+        style={{
+          position: 'fixed',
+          top: '1.5rem',
+          right: '1.5rem',
+          background: theme === 'dark' ? '#334155' : 'white',
+          border: 'none',
+          borderRadius: '3rem',
+          width: '3rem',
+          height: '3rem',
+          fontSize: '1.5rem',
+          cursor: 'pointer',
+          boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+          transition: 'transform 0.2s',
+          zIndex: 50,
+        }}
+      >
+        {theme === 'light' ? '🌙' : '☀️'}
+      </button>
 
-      {orders.map(order => (
-        <div key={order.id} className="card" style={{ marginBottom: 10 }}>
-          <p><strong>Заказ #{order.id.slice(0, 8)}</strong></p>
-          <p>📦 Откуда: {order.from_address}</p>
-          <p>🎯 Куда: {order.to_address}</p>
-          <p>⚖️ Вес: {order.weight_kg} кг | 💔 Хрупкий: {order.fragile ? 'Да' : 'Нет'}</p>
-          <p>📌 Статус: {order.status}</p>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
-            <button onClick={() => updateStatus(order.id, 'accepted')} disabled={loading} className="btn-primary">✅ Принять</button>
-            <button onClick={() => updateStatus(order.id, 'picked_up')} disabled={loading} className="btn-primary" style={{ background: '#f59e0b' }}>📦 Забрал</button>
-            <button onClick={() => updateStatus(order.id, 'in_transit')} disabled={loading} className="btn-primary" style={{ background: '#3b82f6' }}>🚗 В пути</button>
-            <button onClick={() => { setCurrentOrderId(order.id); setShowDeliveryModal(true); }} disabled={loading} className="btn-primary" style={{ background: '#10b981' }}>🏠 Доставить</button>
-            <button onClick={() => startCall(`${order.id}-client`, 'Курьер')} className="btn-primary" style={{ background: '#6c757d' }}>📞 Позвонить клиенту</button>
+      <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+        {/* Заголовок */}
+        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+          <div style={{
+            width: '4rem',
+            height: '4rem',
+            background: 'linear-gradient(135deg, #4f46e5, #7c3aed)',
+            borderRadius: '1.5rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 1rem auto',
+            fontSize: '2rem',
+          }}>
+            🚚
+          </div>
+          <h2 style={{ fontSize: '1.8rem', fontWeight: 700, margin: 0, color: theme === 'dark' ? '#f1f5f9' : '#0f172a' }}>
+            Мои задания
+          </h2>
+          <p style={{ color: theme === 'dark' ? '#94a3b8' : '#475569', marginTop: '0.5rem' }}>
+            Управляйте доставками и отслеживайте маршрут
+          </p>
+        </div>
+
+        {/* Статистика */}
+        <div style={{ ...cardStyle, marginBottom: '1.5rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+            <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontSize: '0.85rem', opacity: 0.7 }}>⭐ Рейтинг</div>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#f59e0b' }}>{profile.rating.toFixed(1)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: '0.85rem', opacity: 0.7 }}>💰 Заработано сегодня</div>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#10b981' }}>{todayEarnings.toLocaleString()} ₸</div>
+              </div>
+              <div>
+                <div style={{ fontSize: '0.85rem', opacity: 0.7 }}>📦 Активных заказов</div>
+                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#4f46e5' }}>{orders.length}</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <button
+                onClick={loadOrders}
+                disabled={loading}
+                style={{
+                  padding: '0.5rem 1rem',
+                  borderRadius: '0.75rem',
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #4f46e5, #7c3aed)',
+                  color: 'white',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem',
+                }}
+              >
+                {loading ? '⏳...' : '🔄 Обновить'}
+              </button>
+              {!isOnline && (
+                <span style={{
+                  padding: '0.5rem 1rem',
+                  borderRadius: '0.75rem',
+                  background: 'rgba(239, 68, 68, 0.2)',
+                  color: '#ef4444',
+                  fontSize: '0.85rem',
+                }}>
+                  ⚠️ Офлайн-режим
+                </span>
+              )}
+            </div>
           </div>
         </div>
-      ))}
-      {orders.length === 0 && <p>Нет активных заданий</p>}
+
+        {/* Карта */}
+        <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
+          <div id="courier-map" style={{ width: '100%', height: '450px' }}></div>
+        </div>
+
+        {/* Заказы */}
+        {orders.length === 0 && !loading && (
+          <div style={{ ...cardStyle, textAlign: 'center', padding: '3rem' }}>
+            <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>📭</div>
+            <h3 style={{ marginBottom: '0.5rem', color: theme === 'dark' ? '#f1f5f9' : '#0f172a' }}>
+              Нет активных заданий
+            </h3>
+            <p style={{ color: theme === 'dark' ? '#94a3b8' : '#64748b' }}>
+              Ожидайте назначения новых заказов
+            </p>
+          </div>
+        )}
+
+        {orders.map((order, index) => {
+          const statusInfo = getStatusInfo(order.status);
+          return (
+            <div
+              key={order.id}
+              style={{
+                ...cardStyle,
+                animation: 'fadeInUp 0.3s ease-out',
+                animationDelay: `${index * 0.05}s`,
+                animationFillMode: 'both',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
+                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  📦 Заказ #{order.id.slice(0, 8)}
+                </h3>
+                <span style={{
+                  background: statusInfo.color,
+                  color: 'white',
+                  padding: '0.25rem 0.75rem',
+                  borderRadius: '9999px',
+                  fontSize: '0.75rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.25rem',
+                }}>
+                  {statusInfo.icon} {statusInfo.label}
+                </span>
+              </div>
+
+              <div style={{ marginBottom: '0.75rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                  <span>📍</span>
+                  <span><strong>Откуда:</strong> {order.from_address}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span>🎯</span>
+                  <span><strong>Куда:</strong> {order.to_address}</span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem', fontSize: '0.85rem', opacity: 0.8, flexWrap: 'wrap' }}>
+                <span>⚖️ Вес: {order.weight_kg} кг</span>
+                <span>💔 Хрупкий: {order.fragile ? 'Да' : 'Нет'}</span>
+                {order.price && <span>💰 {order.price.toLocaleString()} ₸</span>}
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                {order.status === 'pending' && (
+                  <button
+                    onClick={() => updateStatus(order.id, 'accepted')}
+                    disabled={loading}
+                    style={{
+                      padding: '0.5rem 1rem',
+                      borderRadius: '0.75rem',
+                      border: 'none',
+                      background: 'linear-gradient(135deg, #10b981, #059669)',
+                      color: 'white',
+                      cursor: 'pointer',
+                      fontSize: '0.85rem',
+                    }}
+                  >
+                    ✅ Принять
+                  </button>
+                )}
+                {order.status === 'accepted' && (
+                  <button
+                    onClick={() => updateStatus(order.id, 'picked_up')}
+                    disabled={loading}
+                    style={{
+                      padding: '0.5rem 1rem',
+                      borderRadius: '0.75rem',
+                      border: 'none',
+                      background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                      color: 'white',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    📦 Забрал
+                  </button>
+                )}
+                {order.status === 'picked_up' && (
+                  <button
+                    onClick={() => updateStatus(order.id, 'in_transit')}
+                    disabled={loading}
+                    style={{
+                      padding: '0.5rem 1rem',
+                      borderRadius: '0.75rem',
+                      border: 'none',
+                      background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+                      color: 'white',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    🚗 В пути
+                  </button>
+                )}
+                {order.status === 'in_transit' && (
+                  <button
+                    onClick={() => { setCurrentOrderId(order.id); setShowDeliveryModal(true); }}
+                    disabled={loading}
+                    style={{
+                      padding: '0.5rem 1rem',
+                      borderRadius: '0.75rem',
+                      border: 'none',
+                      background: 'linear-gradient(135deg, #10b981, #059669)',
+                      color: 'white',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    🏠 Доставить
+                  </button>
+                )}
+                <button
+                  onClick={() => startCall(`${order.id}-client`, 'Курьер')}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    borderRadius: '0.75rem',
+                    border: 'none',
+                    background: 'linear-gradient(135deg, #6b7280, #4b5563)',
+                    color: 'white',
+                    cursor: 'pointer',
+                  }}
+                >
+                  📞 Позвонить клиенту
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
       {showDeliveryModal && (
         <DeliveryConfirmationModal
@@ -480,12 +792,40 @@ export default function Tasks() {
 
       <LanguageSwitcher onLanguageChange={setVoiceLang} />
       <VoiceAssistant 
-        onCommand={handleVoiceCommand} 
+        onCommand={handleVoiceCommand}
         language={voiceLang}
-        ordersCount={ordersCount}
-        rating={rating}
+        ordersCount={orders.length}
+        rating={profile.rating}
         todayEarnings={todayEarnings}
       />
+
+      {/* Анимации */}
+      <style>{`
+        @keyframes fadeInDown {
+          from {
+            opacity: 0;
+            transform: translateX(-50%) translateY(-20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+          }
+        }
+        @keyframes fadeInUp {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }
