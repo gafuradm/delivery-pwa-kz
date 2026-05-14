@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'; // ← добавили useEffect
+import { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useTheme } from '../context/ThemeContext';
@@ -14,31 +14,13 @@ export default function Layout({ children, title, role }: LayoutProps) {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
-
-  // 🔽 НОВЫЙ КОД ДЛЯ PWA УСТАНОВКИ
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [showInstallButton, setShowInstallButton] = useState(false);
+  const [showInstallGuide, setShowInstallGuide] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
 
   useEffect(() => {
-    const handler = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-      setShowInstallButton(true);
-    };
-    window.addEventListener('beforeinstallprompt', handler);
-    return () => window.removeEventListener('beforeinstallprompt', handler);
+    // Проверяем, открыто ли приложение в режиме standalone (PWA)
+    setIsStandalone(window.matchMedia('(display-mode: standalone)').matches);
   }, []);
-
-  const installApp = () => {
-    if (deferredPrompt) {
-      deferredPrompt.prompt();
-      deferredPrompt.userChoice.then(() => {
-        setDeferredPrompt(null);
-        setShowInstallButton(false);
-      });
-    }
-  };
-  // 🔼 КОНЕЦ НОВОГО КОДА
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -78,9 +60,9 @@ export default function Layout({ children, title, role }: LayoutProps) {
             Delivery PWA
           </h1>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            {/* 🔽 НОВАЯ КНОПКА УСТАНОВКИ (появляется только на Android Chrome) */}
-            {showInstallButton && (
-              <button onClick={installApp} className="btn-primary" style={{ background: '#10b981', padding: '0.5rem' }}>
+            {/* Кнопка установки — показываем, если приложение не в режиме standalone */}
+            {!isStandalone && (
+              <button onClick={() => setShowInstallGuide(true)} className="btn-primary" style={{ background: '#10b981', padding: '0.5rem' }}>
                 📲 Установить
               </button>
             )}
@@ -124,6 +106,22 @@ export default function Layout({ children, title, role }: LayoutProps) {
         {title && <h1 style={{ marginBottom: '1rem', fontSize: '1.8rem' }}>{title}</h1>}
         {children}
       </main>
+
+      {/* Модальное окно с инструкцией по установке */}
+      {showInstallGuide && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', zIndex: 2000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+          <div className="card" style={{ maxWidth: 400, width: '90%', textAlign: 'center' }}>
+            <h3>📲 Установите приложение</h3>
+            <p style={{ marginBottom: 16 }}>Чтобы пользоваться приложением как нативным:</p>
+            <div style={{ textAlign: 'left', marginBottom: 20 }}>
+              <p><strong>Android (Chrome):</strong><br />Нажмите ⋮ → «Установить приложение»</p>
+              <p><strong>iPhone (Safari):</strong><br />Нажмите ⎙ → «На экран Домой»</p>
+            </div>
+            <button onClick={() => setShowInstallGuide(false)} className="btn-primary">Закрыть</button>
+          </div>
+        </div>
+      )}
+
       <style>{`
         @media (max-width: 480px) {
           .hide-mobile { display: none; }
