@@ -1,9 +1,25 @@
 {
-    "name":"Доставка Казахстан PWA",
-    "short_name":"DeliveryKZ",
-    "start_url":"/",
-    "display":"standalone",
-    "background_color":"#ffffff",
-    "theme_color":"#2196F3",
-    "icons":[{"src":"icon.png","sizes":"192x192","type":"image/png"}]
-  }
+  "name": "QazconHub — Логистический терминал",
+  "short_name": "QazconHub",
+  "description": "Цифровая платформа логистического терминала: контейнерные операции, ППЖТ, спецтехника, пропускной режим, электронная очередь",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f0f4f8",
+  "theme_color": "#0f2a4a",
+  "orientation": "any",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

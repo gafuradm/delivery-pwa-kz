@@ -1,0 +1,21 @@
+# Зависимости
+node_modules/
+
+# База данных
+server/db/*.db
+server/db/*.db-journal
+server/db/*.db-wal
+server/db/*.db-shm
+
+# Загрузки
+public/uploads/*
+
+# Окружение
+.env
+
+# Логи
+*.log
+npm-debug.log*
+
+# Системные файлы
+.DS_Store
