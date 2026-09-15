@@ -84,7 +84,8 @@
   async function render() {
     content.innerHTML = '<div class="loading">Загрузка…</div>';
     try {
-      const fn = VIEWS[currentView];
+      const views = window.__dashboardCore ? window.__dashboardCore.VIEWS : {};
+      const fn = views[currentView];
       if (fn) await fn();
     } catch (e) {
       content.innerHTML = `<div class="error-box">${esc(e.message)}</div>`;

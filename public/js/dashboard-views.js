@@ -4,7 +4,7 @@
 
   const core = window.__dashboardCore;
   if (!core) return;
-  const { NAV, allowedNav, role, user, $, content, buildNav, switchView, openModal, closeModal, render, VIEWS } = core;
+  const { NAV, allowedNav, role, user, $, content, sideNav, buildNav, switchView, openModal, closeModal, render, VIEWS } = core;
 
   // ============================================================
   // ЗАЯВКИ
@@ -343,6 +343,7 @@
 
   // ---------- Инициализация ----------
   buildNav();
+  pageTitle.textContent = NAV[core.currentView].label;
   render();
 
   // ---------- Socket.IO реального времени ----------
@@ -368,7 +369,58 @@
   $('#logoutBtn').addEventListener('click', () => API.logout());
 
   // ---------- Мобильное меню ----------
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+
+  function openMenu() {
+    sidebar.classList.add('open');
+    overlay.classList.add('show');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeMenu() {
+    sidebar.classList.remove('open');
+    overlay.classList.remove('show');
+    document.body.style.overflow = '';
+  }
+  function isMobileMenu() {
+    return window.matchMedia('(max-width: 900px)').matches;
+  }
+
   $('#menuBtn').addEventListener('click', () => {
-    document.querySelector('.sidebar').classList.toggle('open');
+    if (sidebar.classList.contains('open')) closeMenu();
+    else openMenu();
+  });
+  overlay.addEventListener('click', closeMenu);
+
+  // Закрывать меню после выбора пункта навигации
+  sideNav.addEventListener('click', (e) => {
+    if (e.target.closest('.nav-item') && isMobileMenu()) closeMenu();
+  });
+
+  // Закрывать по клавише Escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && sidebar.classList.contains('open')) closeMenu();
+  });
+
+  // Свайп влево — закрыть меню, свайп вправо от края — открыть
+  let touchStartX = 0;
+  let touchStartY = 0;
+  document.addEventListener('touchstart', (e) => {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  }, { passive: true });
+  document.addEventListener('touchend', (e) => {
+    if (!isMobileMenu()) return;
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    const dy = e.changedTouches[0].clientY - touchStartY;
+    // Горизонтальный свайп значительнее вертикального
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+    if (dx < 0 && sidebar.classList.contains('open')) closeMenu();
+    else if (dx > 0 && !sidebar.classList.contains('open') && touchStartX < 40) openMenu();
+  }, { passive: true });
+
+  // При изменении размера окна на десктоп — сбросить состояние меню
+  window.addEventListener('resize', () => {
+    if (!isMobileMenu() && sidebar.classList.contains('open')) closeMenu();
   });
 })();

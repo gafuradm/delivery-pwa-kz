@@ -19,3 +19,9 @@ npm-debug.log*
 
 # Системные файлы
 .DS_Store
+
+# Playwright и артефакты тестирования
+.playwright-mcp/
+*.png
+!public/icon.png
+login-snapshot.yml

@@ -1,8 +1,14 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
 const bcrypt = require('bcryptjs');
 
-const db = new Database(path.join(__dirname, 'db/terminal.db'));
+// Гарантируем существование директории БД — критично при деплое из чистого репозитория,
+// где пустая папка server/db/ не хранится в git.
+const dbDir = path.join(__dirname, 'db');
+fs.mkdirSync(dbDir, { recursive: true });
+
+const db = new Database(path.join(dbDir, 'terminal.db'));
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 

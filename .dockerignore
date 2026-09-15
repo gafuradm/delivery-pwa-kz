@@ -1,0 +1,27 @@
+# Зависимости — устанавливаются внутри образа (важно: не перетирать linux-бинарь better-sqlite3)
+node_modules
+npm-debug.log*
+
+# Git и служебные файлы
+.git
+.gitignore
+.dockerignore
+
+# Локальные данные и загрузки (в контейнере создаются заново)
+server/db
+public/uploads
+
+# Окружение и секреты
+.env
+.env.example
+
+# Артефакты, не нужные в рантайме
+.playwright-mcp
+test
+fly.toml
+PROJECT.pdf
+dash-desktop.png
+final-dashboard-desktop.png
+mobile-menu.png
+mobile-overview.png
+login-snapshot.yml

@@ -147,7 +147,7 @@ body {
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); animation: pulse 1.5s infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
 .clock { font-family: 'SF Mono', Menlo, monospace; font-weight: 600; color: var(--text); }
-.menu-btn { display: none; }
+.topbar .menu-btn { display: none; }
 
 .content { flex: 1; overflow-y: auto; padding: 24px; }
 
@@ -304,6 +304,7 @@ body {
   z-index: 100;
   padding: 20px;
 }
+.modal-overlay[hidden] { display: none; }
 .modal {
   background: var(--panel);
   border-radius: 16px;
@@ -319,6 +320,7 @@ body {
 
 /* ---------- Пути (ППЖТ) ---------- */
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+.grid-2 > * { min-width: 0; }
 .track-list { display: flex; flex-direction: column; gap: 14px; }
 .track-item {
   border: 1px solid var(--border);
@@ -410,12 +412,103 @@ body {
 }
 .empty { color: var(--muted); text-align: center; padding: 30px; }
 
-/* ---------- Адаптивность ---------- */
+/* ---------- Оверлей мобильного меню ---------- */
+.sidebar-overlay {
+  position: fixed; inset: 0;
+  background: rgba(11, 33, 56, 0.5);
+  backdrop-filter: blur(2px);
+  z-index: 40;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.25s ease, visibility 0.25s ease;
+}
+.sidebar-overlay.show { opacity: 1; visibility: visible; }
+
+/* ============================================================
+   Адаптивность
+   ============================================================ */
+
+/* ---------- Планшет (≤ 1100px) ---------- */
+@media (max-width: 1100px) {
+  .sidebar { width: 220px; }
+  .content { padding: 18px; }
+  .topbar { padding: 12px 18px; }
+  .stats-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+}
+
+/* ---------- Мобильное меню / планшет (≤ 900px) ---------- */
 @media (max-width: 900px) {
   .grid-2 { grid-template-columns: 1fr; }
-  .sidebar { position: fixed; left: 0; top: 0; bottom: 0; z-index: 50; transform: translateX(-100%); }
-  .sidebar.open { transform: translateX(0); }
-  .menu-btn { display: inline-flex; }
-  .content { padding: 16px; }
   .form-row { grid-template-columns: 1fr; }
+
+  /* Боковое меню — выезжающая панель */
+  .sidebar {
+    position: fixed; left: 0; top: 0; bottom: 0;
+    width: 270px;
+    z-index: 60;
+    transform: translateX(-100%);
+    box-shadow: var(--shadow-lg);
+  }
+  .sidebar.open { transform: translateX(0); }
+  .topbar .menu-btn { display: inline-flex; }
+  .content { padding: 14px; }
+  .topbar { padding: 10px 14px; gap: 10px; }
+  .topbar h2 { font-size: 16px; }
+  .live-text { display: none; }
+  .clock { font-size: 12px; }
+  .stats-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+  .eq-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+  .panel { padding: 16px; }
+  .stat-card { padding: 16px; }
+  .stat-value { font-size: 26px; }
+  .modal { max-width: 100%; padding: 20px; }
+  .toast { left: 16px; right: 16px; bottom: 16px; max-width: none; text-align: center; }
+}
+
+/* ---------- Мобильный (≤ 600px) ---------- */
+@media (max-width: 600px) {
+  .content { padding: 12px; }
+  .topbar { padding: 8px 12px; }
+  .topbar h2 { font-size: 15px; }
+  .clock { display: none; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .stat-card { padding: 14px; }
+  .stat-icon { font-size: 22px; margin-bottom: 6px; }
+  .stat-value { font-size: 24px; }
+  .stat-label { font-size: 12px; }
+  .eq-grid { grid-template-columns: 1fr; }
+  .panel { padding: 14px; margin-bottom: 14px; }
+  .panel-head h3 { font-size: 15px; }
+  .btn { padding: 8px 13px; }
+  .modal { padding: 18px; border-radius: 14px; max-height: 92vh; }
+  .modal-actions { flex-direction: column-reverse; }
+  .modal-actions .btn { width: 100%; }
+  .quick-actions .btn { flex: 1 1 auto; }
+  .table th, .table td { padding: 8px 10px; }
+  .ocr-plate { font-size: 18px; }
+  .report-card { padding: 20px; }
+}
+
+/* ---------- Очень маленький экран (≤ 380px) ---------- */
+@media (max-width: 380px) {
+  .stats-grid { grid-template-columns: 1fr; }
+  .sidebar { width: 100%; }
+  .content { padding: 10px; }
+  .stat-value { font-size: 22px; }
+}
+
+/* ---------- Логин (мобильный) ---------- */
+@media (max-width: 480px) {
+  .login-body { padding: 12px; align-items: flex-start; }
+  .login-card { padding: 26px 20px; border-radius: 14px; }
+  .login-logo h1 { font-size: 22px; }
+  .logo-badge { width: 56px; height: 56px; font-size: 30px; }
+  .hint-grid { grid-template-columns: 1fr; }
+  .login-hint { font-size: 11px; }
+}
+
+/* ---------- Планшетная ориентация (альбомная, ≤ 900px высота) ---------- */
+@media (max-height: 700px) and (max-width: 900px) {
+  .sidebar { overflow-y: auto; }
+  .side-nav { overflow-y: auto; }
 }

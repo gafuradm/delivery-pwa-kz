@@ -5,16 +5,19 @@ RUN apk add --no-cache python3 make g++
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm install --production
+ENV NODE_ENV=production
 
+# Сначала зависимости — используем кэш слоёв Docker
+COPY package*.json ./
+RUN npm install --omit=dev && npm cache clean --force
+
+# Затем исходники (node_modules и локальная БД исключены через .dockerignore)
 COPY . .
 
-# Директория для загрузок
-RUN mkdir -p public/uploads
+# Директории для данных и загрузок
+RUN mkdir -p server/db public/uploads
 
 EXPOSE 8080
 
-ENV NODE_ENV=production
-
+# Render передаёт порт через переменную окружения PORT (по умолчанию 8080)
 CMD ["node", "server/server.js"]
