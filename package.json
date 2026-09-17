@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server/server.js",
     "dev": "node server/server.js",
-    "seed": "node server/db.js"
+    "seed": "node server/db.js",
+    "test": "node test/api-test.js"
   },
   "engines": {
     "node": ">=18"

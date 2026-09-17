@@ -1,5 +1,11 @@
-/* Комплексное тестирование API QazconHub (smoke + RBAC) */
-const BASE = 'http://localhost:8080';
+/* Комплексное тестирование API QazconHub (smoke + RBAC)
+ *
+ * Требуется запущенный сервер. Чтобы тестовые записи не попадали в рабочую базу,
+ * запускайте сервер с отдельным файлом БД:
+ *   DB_PATH=/tmp/qazconhub-test.db npm start &
+ *   npm test                        # или BASE_URL=https://<хост> npm test
+ */
+const BASE = process.env.BASE_URL || 'http://localhost:8080';
 let pass = 0, fail = 0;
 const fails = [];
 
@@ -26,6 +32,15 @@ async function req(method, path, { token, body, form } = {}) {
 const TS = Date.now().toString().slice(-6);
 
 (async () => {
+  try {
+    await fetch(BASE + '/api/stats');
+  } catch (e) {
+    console.error(`\n❌ Сервер недоступен по адресу ${BASE} (${e.cause?.code || e.message})`);
+    console.error('   Запустите его командой npm start и повторите тест.\n');
+    process.exit(2);
+  }
+
+  console.log(`\nБазовый адрес: ${BASE}`);
   console.log('\n===== 1. AUTH / СТАТИСТИКА =====');
   const noTok = await req('GET', '/api/stats');
   log(noTok.status === 401, 'GET /api/stats без токена → 401', `status=${noTok.status}`);
@@ -72,12 +87,13 @@ const TS = Date.now().toString().slice(-6);
   log(tracks.status === 200 && Array.isArray(tracks.data) && 'occupied' in (tracks.data[0] || {}),
     'GET /api/tracks (с вагонами и occupied)', `count=${tracks.data?.length}`);
   const trackId = tracks.data?.[0]?.id;
+  const trackName = tracks.data?.[0]?.name;
 
   const tCreate = await req('POST', '/api/tracks', { token: T, body: { name: 'Путь ТЕСТ-' + TS, capacity: 15, zone: 'Зона В' } });
   log(tCreate.status === 201, 'POST /api/tracks', `status=${tCreate.status}`);
 
   const wList = await req('GET', '/api/wagons', { token: T });
-  log(wList.status === 200 && Array.isArray(wList.data) && ('track_name' in (wList.data[0] || {})), 'GET /api/wagons (JOIN track_name)', `count=${wList.data?.length}`);
+  log(wList.status === 200 && Array.isArray(wList.data), 'GET /api/wagons', `count=${wList.data?.length}`);
 
   const wCreate = await req('POST', '/api/wagons', { token: T, body: { number: 'WAG' + TS, cargo: 'Уголь', owner: 'КТЖ', track_id: trackId, operation: 'прибытие' } });
   log(wCreate.status === 201 && wCreate.data?.id, 'POST /api/wagons', `status=${wCreate.status}`);
@@ -85,6 +101,11 @@ const TS = Date.now().toString().slice(-6);
   if (wId) {
     const wPatch = await req('PATCH', `/api/wagons/${wId}`, { token: T, body: { status: 'на_пути' } });
     log(wPatch.status === 200 && wPatch.data?.status === 'на_пути', 'PATCH /api/wagons/:id', `status=${wPatch.status}`);
+
+    // JOIN проверяем на только что созданном вагоне: на чистой БД список изначально пуст,
+    // поэтому раньше проверка падала при отсутствии данных (тест зависел от прошлых прогонов).
+    const wOwn = (await req('GET', '/api/wagons', { token: T })).data?.find((w) => w.id === wId);
+    log(!!wOwn && wOwn.track_name === trackName, 'GET /api/wagons (JOIN track_name)', `track_name=${wOwn?.track_name}`);
   }
 
   console.log('\n===== 4. СПЕЦТЕХНИКА =====');

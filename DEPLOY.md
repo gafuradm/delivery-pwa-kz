@@ -52,6 +52,23 @@ https://qazconhub-terminal.onrender.com
 - `NODE_ENV=production`.
 - `PORT` — Render подставляет сам, сервер его подхватывает.
 
+`JWT_SECRET` обязателен при `NODE_ENV=production`: сервер проверяет его на старте и
+завершается с `[FATAL] Переменная окружения JWT_SECRET не задана`, если он не передан.
+Это защита от продакшена на дефолтном секрете из репозитория (иначе токен с ролью
+`admin` мог бы подписать любой, у кого есть исходники).
+
+Поэтому при ручных способах деплоя секрет нужно задать самому:
+
+```bash
+# Fly.io — до первого деплоя
+fly secrets set JWT_SECRET="$(openssl rand -hex 32)"
+
+# Docker
+docker run -p 8080:8080 -e JWT_SECRET="$(openssl rand -hex 32)" qazconhub-terminal
+
+# Render без Blueprint: Settings → Environment → Add Environment Variable
+```
+
 ## Альтернатива: ручной деплой (без Blueprint)
 **New +** → **Web Service** → выберите репозиторий → **Branch: `qazconhub`** →
 **Runtime: Docker** → **Instance Type: Free** → **Health Check Path: `/`** → **Create Web Service**.
@@ -62,3 +79,8 @@ https://qazconhub-terminal.onrender.com
 ```
 git push origin master:qazconhub
 ```
+
+Если менялись `public/css/style.css` или `public/js/*.js`, поднимите версию кэша в
+[`public/sw.js`](public/sw.js:1) — например, `qazconhub-cache-v3`. Статика отдаётся
+service worker'ом по стратегии cache-first, поэтому у вернувшихся пользователей иначе
+останется старая версия файлов до фонового обновления кэша.

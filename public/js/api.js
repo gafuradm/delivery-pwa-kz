@@ -187,3 +187,13 @@ function toast(msg, type) {
   setTimeout(() => el.classList.add('show'), 10);
   setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 300); }, 3000);
 }
+
+// PWA: регистрация service worker. Без неё офлайн-режим и установка приложения на
+// домашний экран не работают, хотя sw.js и manifest.json корректно отдаются сервером.
+// Регистрация разрешена только в защищённом контексте (HTTPS или localhost).
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .catch((e) => console.warn('Service worker не зарегистрирован:', e.message));
+  });
+}

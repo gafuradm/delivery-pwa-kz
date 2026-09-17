@@ -81,8 +81,10 @@
 # Установка зависимостей
 npm install
 
-# Настройка окружения (опционально)
+# Настройка окружения: JWT_SECRET обязателен в продакшене
 cp .env.example .env
+# и замените значение на случайное, например:
+#   openssl rand -hex 32
 
 # Запуск сервера
 npm start
@@ -94,15 +96,40 @@ npm start
 
 ```bash
 docker build -t qazconhub-terminal .
-docker run -p 8080:8080 qazconhub-terminal
+docker run -p 8080:8080 -e JWT_SECRET="$(openssl rand -hex 32)" qazconhub-terminal
 ```
+
+В образе выставлен `NODE_ENV=production`, поэтому без `JWT_SECRET` контейнер завершится
+с ошибкой — это защита от запуска в продакшене на секрете, лежащем в репозитории.
 
 ### Fly.io
 
 ```bash
 fly launch
+fly secrets set JWT_SECRET="$(openssl rand -hex 32)"
 fly deploy
 ```
+
+### Тестирование
+
+```bash
+# изолированная БД, чтобы smoke-тест не трогал рабочие данные
+DB_PATH=/tmp/qazconhub-test.db npm start &
+npm test
+```
+
+Smoke + RBAC-проверка API (55 проверок: авторизация, справочники, все модули,
+PDF-отчёты, загрузка файлов, разграничение доступа). Можно направить на любой
+развёрнутый сервис: `BASE_URL=https://qazconhub-terminal.onrender.com npm test`.
+
+## ⚙️ Переменные окружения
+
+| Переменная | По умолчанию | Назначение |
+|------------|--------------|------------|
+| `JWT_SECRET` | — | Секрет подписи JWT. **Обязателен** при `NODE_ENV=production`; без него процесс завершается с ошибкой |
+| `PORT` | `8080` | Порт HTTP-сервера |
+| `NODE_ENV` | — | `production` включает строгую проверку `JWT_SECRET` |
+| `DB_PATH` | `server/db/terminal.db` | Путь к файлу SQLite (удобно для тестов и внешнего диска) |
 
 ## 🔒 Безопасность
 

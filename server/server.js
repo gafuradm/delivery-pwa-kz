@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -17,7 +17,26 @@ const io = new Server(server, { cors: { origin: '*' } });
 
 const PORT = process.env.PORT || 8080;
 const HOST = '0.0.0.0';
-const JWT_SECRET = process.env.JWT_SECRET || 'qazconhub-terminal-secret-change-in-prod';
+
+// Дефолтный секрет лежит в открытом репозитории, поэтому он годится только для
+// локальной разработки: в продакшене подпись токенов им означала бы, что любой
+// желающий может выпустить токен с ролью admin.
+const DEFAULT_JWT_SECRET = 'qazconhub-terminal-secret-change-in-prod';
+const JWT_SECRET = process.env.JWT_SECRET || DEFAULT_JWT_SECRET;
+if (!process.env.JWT_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error(
+      '[FATAL] Переменная окружения JWT_SECRET не задана.\n' +
+      '        Запуск в продакшене с секретом из репозитория запрещён: токены стали бы\n' +
+      '        подделываемыми. Задайте секрет (например, JWT_SECRET="$(openssl rand -hex 32)").'
+    );
+    process.exit(1);
+  }
+  console.warn(
+    '[SECURITY] JWT_SECRET не задан — используется небезопасный секрет по умолчанию.\n' +
+    '           Локально: cp .env.example .env и укажите случайное значение.'
+  );
+}
 
 // ---------- Middleware ----------
 app.use(cors());

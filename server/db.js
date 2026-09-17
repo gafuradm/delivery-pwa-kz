@@ -8,7 +8,12 @@ const bcrypt = require('bcryptjs');
 const dbDir = path.join(__dirname, 'db');
 fs.mkdirSync(dbDir, { recursive: true });
 
-const db = new Database(path.join(dbDir, 'terminal.db'));
+// DB_PATH позволяет использовать отдельный файл БД (например, изолированный для
+// smoke-тестов), не затрагивая рабочие данные. По умолчанию — server/db/terminal.db.
+const dbFile = process.env.DB_PATH || path.join(dbDir, 'terminal.db');
+if (dbFile !== ':memory:') fs.mkdirSync(path.dirname(dbFile), { recursive: true });
+
+const db = new Database(dbFile);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 

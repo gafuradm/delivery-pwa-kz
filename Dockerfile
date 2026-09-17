@@ -9,7 +9,7 @@ ENV NODE_ENV=production
 
 # Сначала зависимости — используем кэш слоёв Docker
 COPY package*.json ./
-RUN npm install --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
 # Затем исходники (node_modules и локальная БД исключены через .dockerignore)
 COPY . .
