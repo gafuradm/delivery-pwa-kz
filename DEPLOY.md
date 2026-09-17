@@ -94,6 +94,29 @@ git push origin master:qazconhub
 ```
 
 Если менялись `public/css/style.css` или `public/js/*.js`, поднимите версию кэша в
-[`public/sw.js`](public/sw.js:1) — например, `qazconhub-cache-v3`. Статика отдаётся
+[`public/sw.js`](public/sw.js:1) (текущая — `qazconhub-cache-v7`). Статика отдаётся
 service worker'ом по стратегии cache-first, поэтому у вернувшихся пользователей иначе
 останется старая версия файлов до фонового обновления кэша.
+
+## Если автодеплой не сработал
+`autoDeploy` из [`render.yaml`](render.yaml:11) применяется при создании сервиса из Blueprint.
+Для уже созданного сервиса проверьте настройки и подтвердите деплой вручную:
+
+1. Панель Render → сервис **qazconhub-terminal** → **Settings → Build & Deploy**:
+   **Auto-Deploy: Yes**, **Branch: `qazconhub`** (не `master` — там старое React/Supabase-приложение).
+2. Затем **Manual Deploy → Deploy latest commit** и дождитесь завершения сборки в **Logs**.
+3. Проверка, что прод подхватил изменения:
+
+```bash
+curl -s  https://qazconhub-terminal.onrender.com/sw.js | grep CACHE_NAME          # актуальная версия кэша
+curl -sI https://qazconhub-terminal.onrender.com/js/dashboard-docs.js | head -1   # 200, а не 404
+curl -sI https://qazconhub-terminal.onrender.com/js/dashboard.js | grep -i last-modified
+```
+
+Признаки устаревшей сборки: `/js/dashboard-docs.js` отдаёт **404**, а `last-modified`
+у `dashboard.js` старше даты последнего пуша.
+
+## Проверка прод-функционала после деплоя
+- Вход: **admin / admin123** (seed-данные).
+- Быстрый признак новой версии — раздел **«Документы»** в панели и доступный файл `/js/dashboard-docs.js`.
+- На бесплатном тарифе первый запрос после простоя — «холодный старт» 30–60 секунд.
