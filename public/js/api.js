@@ -46,6 +46,9 @@ const API = {
   patch(path, body) {
     return this.request(path, { method: 'PATCH', body: JSON.stringify(body) });
   },
+  del(path) {
+    return this.request(path, { method: 'DELETE' });
+  },
   async uploadPhoto(file) {
     const fd = new FormData();
     fd.append('photo', file);
@@ -126,6 +129,43 @@ const VEHICLE_STATUS = {
   'выехал': 'Выехал'
 };
 
+// Статусы документов документооборота: завоз/вывоз и расходная накладная
+const OPERATION_STATUS = {
+  'черновик': 'Черновик',
+  'оформлен': 'Оформлен',
+  'завершён': 'Завершён',
+  'отменён': 'Отменён'
+};
+
+const INVOICE_STATUS = {
+  'черновик': 'Черновик',
+  'оформлена': 'Оформлена',
+  'закрыта': 'Закрыта'
+};
+
+const PASS_TYPE = {
+  'разовый': 'Разовый',
+  'постоянный': 'Постоянный'
+};
+
+// Название записи справочника по её id — для таблиц документов, где хранится ссылка.
+function refName(list, id) {
+  if (!Array.isArray(list) || !id) return '—';
+  const found = list.find((x) => Number(x.id) === Number(id));
+  return found ? found.name : '—';
+}
+
+// Значение для полей даты (без времени) в формате input[type=date]
+function dateInputValue(s) {
+  if (!s) return '';
+  return String(s).slice(0, 10);
+}
+
+// Сумма количества по строкам накладной
+function itemsTotal(items) {
+  return (items || []).reduce((sum, it) => sum + (Number(it.qty) || 0), 0);
+}
+
 function statusLabel(s, map) {
   if (map) return map[s] || s;
   return s;
@@ -156,20 +196,33 @@ function statusClass(s) {
     'на_ремонте': 'st-cancelled',
     'выехал': 'st-done',
     'активен': 'st-ok',
-    'использован': 'st-done'
+    'использован': 'st-done',
+    'черновик': 'st-new',
+    'оформлен': 'st-assigned',
+    'завершён': 'st-done',
+    'отменён': 'st-cancelled',
+    'оформлена': 'st-ok',
+    'закрыта': 'st-done'
   };
   return map[s] || '';
 }
 
+// Экранирование подставляемых в HTML значений.
+// Символы собираются из кодов, чтобы в исходнике не было литеральных кавычек,
+// и подстановка идёт через split/join: знак доллара и обратный слэш в данных
+// при этом не интерпретируются как часть замены.
 function esc(s) {
-  var q = String.fromCharCode(39);
-  var aq = '&#' + '39;';
+  var AMP = String.fromCharCode(38);
+  var QUOT = String.fromCharCode(34);
+  var APOS = String.fromCharCode(39);
+  var LT = String.fromCharCode(60);
+  var GT = String.fromCharCode(62);
   return String(s == null ? '' : s)
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '"')
-    .replace(new RegExp(q, 'g'), aq);
+    .split(AMP).join(AMP + 'amp;')
+    .split(LT).join(AMP + 'lt;')
+    .split(GT).join(AMP + 'gt;')
+    .split(QUOT).join(AMP + 'quot;')
+    .split(APOS).join(AMP + '#' + '39;');
 }
 
 function fmtDate(s) {

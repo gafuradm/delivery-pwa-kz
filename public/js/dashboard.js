@@ -13,6 +13,10 @@
   // ---------- Навигация по ролям ----------
   const NAV = {
     overview: { label: 'Обзор', icon: '📊', roles: ['admin', 'director', 'dispatcher', 'ppjt', 'receiver', 'crane', 'store', 'guard', 'customs', 'finance', 'shift'] },
+    inbound: { label: 'Завоз', icon: '📥', roles: ['admin', 'dispatcher', 'receiver', 'ppjt', 'store', 'guard', 'shift'] },
+    outbound: { label: 'Вывоз', icon: '📤', roles: ['admin', 'dispatcher', 'receiver', 'ppjt', 'store', 'guard', 'shift'] },
+    invoices: { label: 'Расходные накладные', icon: '🧾', roles: ['admin', 'dispatcher', 'finance', 'store', 'shift'] },
+    dictionaries: { label: 'Справочники', icon: '🗂️', roles: ['admin', 'dispatcher', 'shift'] },
     containers: { label: 'Контейнеры', icon: '📦', roles: ['admin', 'dispatcher', 'receiver', 'crane', 'store', 'shift', 'customs'] },
     tracks: { label: 'Пути и вагоны', icon: '🚂', roles: ['admin', 'ppjt', 'receiver', 'shift'] },
     equipment: { label: 'Спецтехника', icon: '🏗️', roles: ['admin', 'dispatcher', 'crane', 'shift'] },
@@ -68,8 +72,15 @@
   }
 
   // ---------- Модальное окно ----------
-  function openModal(html) {
-    $('#modalBox').innerHTML = html;
+  // Длинные карточки документов (завоз/вывоз, расходная накладная) открываются шире,
+  // чтобы поля и кнопки ОК / Записать / Закрыть помещались без прокрутки.
+  const WIDE_MODAL = /<form id="(opCard|invCard|invForm)"/;
+
+  function openModal(html, variant) {
+    const box = $('#modalBox');
+    box.className = variant || WIDE_MODAL.test(html) ? 'modal modal-wide' : 'modal';
+    box.innerHTML = html;
+    box.scrollTop = 0;
     $('#modalOverlay').hidden = false;
     $('#modalOverlay').querySelectorAll('[data-close]').forEach(el => el.addEventListener('click', closeModal));
   }
@@ -98,6 +109,10 @@
   async function viewOverview() {
     const s = await API.get('/api/stats');
     const cards = [
+      { label: 'Завоз за сутки', value: s.operationsIn, sub: `В работе: ${s.operationsOpen}`, icon: '📥', cls: 'blue' },
+      { label: 'Вывоз за сутки', value: s.operationsOut, sub: `В работе: ${s.operationsOpen}`, icon: '📤', cls: 'green' },
+      { label: 'Накладные за сутки', value: s.invoicesToday, sub: 'Расходные накладные', icon: '🧾', cls: 'orange' },
+      { label: 'Пропуска за сутки', value: s.passesToday, sub: 'Пропускной режим', icon: '🛂', cls: 'purple' },
       { label: 'Контейнеры на терминале', value: s.containersFull, sub: `Всего: ${s.containers}`, icon: '📦', cls: 'blue' },
       { label: 'Вагоны на путях', value: s.wagonsOnTrack, sub: `Всего: ${s.wagons}`, icon: '🚂', cls: 'green' },
       { label: 'Спецтехника свободна', value: s.eqFree, sub: `Всего: ${s.equipment}`, icon: '🏗️', cls: 'orange' },
@@ -119,6 +134,9 @@
       <div class="panel">
         <div class="panel-head"><h3>Быстрые действия</h3></div>
         <div class="quick-actions">
+          ${allowedNav.includes('inbound') ? `<button class="btn btn-primary" data-go="inbound">📥 Завоз</button>` : ''}
+          ${allowedNav.includes('outbound') ? `<button class="btn btn-primary" data-go="outbound">📤 Вывоз</button>` : ''}
+          ${allowedNav.includes('invoices') ? `<button class="btn btn-primary" data-go="invoices">🧾 Расходные накладные</button>` : ''}
           ${allowedNav.includes('containers') ? `<button class="btn btn-primary" data-go="containers">📦 Контейнеры</button>` : ''}
           ${allowedNav.includes('tracks') ? `<button class="btn btn-primary" data-go="tracks">🚂 Пути и вагоны</button>` : ''}
           ${allowedNav.includes('queue') ? `<button class="btn btn-primary" data-go="queue">🔢 Очередь</button>` : ''}

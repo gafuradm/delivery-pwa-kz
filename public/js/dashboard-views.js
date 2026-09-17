@@ -348,6 +348,9 @@
 
   // ---------- Socket.IO реального времени ----------
   const socket = connectSocket();
+  // Сокет доступен другим модулям панели (документооборот), чтобы не открывать
+  // второе соединение на ту же страницу.
+  window.__dashboardSocket = socket;
   if (socket) {
     socket.emit('terminal:join', role);
     socket.on('container:update', () => { if (core.currentView === 'containers') render(); });
@@ -356,6 +359,7 @@
     socket.on('vehicle:update', () => { if (core.currentView === 'vehicles') render(); });
     socket.on('request:update', () => { if (core.currentView === 'requests') render(); });
     socket.on('queue:update', () => { if (core.currentView === 'queue') render(); });
+    socket.on('pass:update', () => { if (core.currentView === 'passes') render(); });
     socket.on('barrier:update', (d) => {
       const st = $('#barStatus');
       if (st) {

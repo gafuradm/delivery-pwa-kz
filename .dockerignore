@@ -20,8 +20,14 @@ public/uploads
 test
 fly.toml
 PROJECT.pdf
-dash-desktop.png
-final-dashboard-desktop.png
-mobile-menu.png
-mobile-overview.png
 login-snapshot.yml
+
+# Артефакты визуальной проверки (остаётся только иконка PWA)
+*.png
+**/*.png
+!public/icon.png
+
+# Скриншоты и фотографии-образцы — не попадают в образ
+*.jpg
+*.jpeg
+IMG-*

@@ -7,7 +7,10 @@
     "start": "node server/server.js",
     "dev": "node server/server.js",
     "seed": "node server/db.js",
-    "test": "node test/api-test.js"
+    "test": "sh test/run-isolated.sh",
+    "test:direct": "node test/api-test.js",
+    "db:clean-test": "node tools/cleanup-test-data.js",
+    "docs:pdf": "node tools/build-project-pdf.js"
   },
   "engines": {
     "node": ">=18"

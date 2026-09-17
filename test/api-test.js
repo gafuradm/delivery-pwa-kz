@@ -1,9 +1,12 @@
 /* Комплексное тестирование API QazconHub (smoke + RBAC)
  *
- * Требуется запущенный сервер. Чтобы тестовые записи не попадали в рабочую базу,
- * запускайте сервер с отдельным файлом БД:
- *   DB_PATH=/tmp/qazconhub-test.db npm start &
- *   npm test                        # или BASE_URL=https://<хост> npm test
+ * Тест СОЗДАЁТ записи и НЕ удаляет их за собой, поэтому прогонять его против рабочей
+ * базы нельзя. Два безопасных способа:
+ *   npm test                        # изолированный прогон: свой сервер на :8099 и /tmp-БД
+ *   BASE_URL=https://<хост> npm run test:direct
+ *
+ * Прямой прогон против сервера по умолчанию (:8080 — рабочая БД) заблокирован;
+ * осознанно разрешить запись в рабочую БД можно так: ALLOW_DIRTY_DB=1 npm run test:direct
  */
 const BASE = process.env.BASE_URL || 'http://localhost:8080';
 let pass = 0, fail = 0;
@@ -37,6 +40,16 @@ const TS = Date.now().toString().slice(-6);
   } catch (e) {
     console.error(`\n❌ Сервер недоступен по адресу ${BASE} (${e.cause?.code || e.message})`);
     console.error('   Запустите его командой npm start и повторите тест.\n');
+    process.exit(2);
+  }
+
+  const isWorkDb = /^https?:\/\/(localhost|127\.0\.0\.1):8080\/?$/.test(BASE.trim());
+  if (isWorkDb && process.env.ALLOW_DIRTY_DB !== '1') {
+    console.error('\n⛔ Остановлено: тест пишет данные и не удаляет их за собой.');
+    console.error(`   ${BASE} — это рабочий сервер (server/db/terminal.db).`);
+    console.error('   Безопасный прогон:            npm test            # свой сервер на :8099 + временная БД');
+    console.error('   Тест против другого сервера:  BASE_URL=http://host:port npm run test:direct');
+    console.error('   Явно разрешить рабочую БД:    ALLOW_DIRTY_DB=1 npm run test:direct\n');
     process.exit(2);
   }
 
@@ -166,7 +179,10 @@ const TS = Date.now().toString().slice(-6);
   const pPlate = 'P' + TS;
   const pCreate = await req('POST', '/api/passes', { token: T, body: { plate: pPlate, type: 'разовый' } });
   const pCode = pCreate.data?.code;
-  log(pCreate.status === 201 && String(pCode).startsWith('PASS-'), 'POST /api/passes (код PASS-XXX)', `code=${pCode}`);
+  // Нумерация пропусков сквозная и совпадает с журналом терминала (Пропуск 000020129)
+  log(pCreate.status === 201 && /^\d{9}$/.test(String(pCode)), 'POST /api/passes (сквозной номер из 9 цифр)', `code=${pCode}`);
+  const pBadType = await req('POST', '/api/passes', { token: T, body: { plate: 'Q' + TS, type: 'вечный' } });
+  log(pBadType.status === 201 && pBadType.data?.type === 'разовый', 'Недопустимый тип пропуска → fallback «разовый»', `type=${pBadType.data?.type}`);
 
   const ocrOk = await req('POST', '/api/ocr/recognize', { token: T, body: { plate: pPlate } });
   log(ocrOk.status === 200 && ocrOk.data?.allowed === true && ocrOk.data?.barrier === 'open',
@@ -209,12 +225,184 @@ const TS = Date.now().toString().slice(-6);
   const badType = await req('POST', '/api/upload-photo', { token: T, form: txt });
   log(badType.status === 400, 'POST /api/upload-photo (не изображение) → 400', `status=${badType.status}`);
 
-  console.log('\n===== 10. RBAC (разграничение доступа) =====');
+  console.log('\n===== 10. ДОКУМЕНТООБОРОТ: СПРАВОЧНИКИ, ЗАВОЗ/ВЫВОЗ, НАКЛАДНЫЕ =====');
+  const dict = await req('GET', '/api/dictionaries', { token: T });
+  const dictOk = dict.status === 200 && Array.isArray(dict.data?.warehouses) && dict.data.warehouses.length > 0
+    && Array.isArray(dict.data?.counterparties) && Array.isArray(dict.data?.responsible);
+  log(dictOk, 'GET /api/dictionaries (склады, контрагенты, ответственные)',
+    `склады=${dict.data?.warehouses?.length}, контрагенты=${dict.data?.counterparties?.length}, сотрудники=${dict.data?.responsible?.length}`);
+  log((dict.data?.operationStatuses || []).includes('черновик') && (dict.data?.transportModes || []).length > 0,
+    'Справочник значений документа заполнен (статусы, вид транспорта)');
+  const warehouses = dict.data?.warehouses || [];
+
+  const whName = 'Склад ТЕСТ-' + TS;
+  const whCreate = await req('POST', '/api/warehouses', { token: T, body: { name: whName, code: 'WH' + TS } });
+  log(whCreate.status === 201 && whCreate.data?.id, 'POST /api/warehouses', `status=${whCreate.status}`);
+  const whDup = await req('POST', '/api/warehouses', { token: T, body: { name: whName } });
+  log(whDup.status === 409, 'Повторный склад → 409 (уникальность)', `status=${whDup.status}`);
+  const whEmpty = await req('POST', '/api/warehouses', { token: T, body: { code: 'X' } });
+  log(whEmpty.status === 400, 'POST /api/warehouses без названия → 400', `status=${whEmpty.status}`);
+
+  const cpName = 'ТОО «ТЕСТ-' + TS + '»';
+  const cpCreate = await req('POST', '/api/counterparties', { token: T, body: { name: cpName, kind: 'получатель', bin: '1234567' + TS } });
+  log(cpCreate.status === 201 && cpCreate.data?.id, 'POST /api/counterparties', `status=${cpCreate.status}`);
+  const cpId = cpCreate.data?.id;
+  const cpBadKind = await req('POST', '/api/counterparties', { token: T, body: { name: 'Роль ТЕСТ-' + TS, kind: 'несуществующая' } });
+  log(cpBadKind.status === 201 && cpBadKind.data?.kind === 'контрагент',
+    'Неизвестная роль контрагента → fallback «контрагент»', `kind=${cpBadKind.data?.kind}`);
+
+  // ---- Завоз ----
+  const inCreate = await req('POST', '/api/operations', {
+    token: T,
+    body: {
+      kind: 'завоз', movement: 'Завоз порожний', transport_mode: 'Железной дорогой',
+      container_id: cId, container_category: '40 футовый', seal_no: '1234567',
+      plate: vPlate, driver: 'ТЕСТ ВОДИТЕЛЬ',
+      warehouse_id: whCreate.data?.id || warehouses[0]?.id,
+      counterparty_id: cpId, owner_id: cpId, recipient_id: cpId, wagon_id: wId
+    }
+  });
+  log(inCreate.status === 201 && /^\d{5}$/.test(String(inCreate.data?.doc_no)),
+    'POST /api/operations «завоз» (номер из 5 цифр)', `doc_no=${inCreate.data?.doc_no}`);
+  const inId = inCreate.data?.id;
+  log(inCreate.data?.warehouse_name === whName && inCreate.data?.counterparty_name === cpName,
+    'Завоз подтягивает названия справочников (JOIN)', `склад=${inCreate.data?.warehouse_name}`);
+  log(inCreate.data?.container_number === cNum, 'Контейнер связан с документом завоза', `container=${inCreate.data?.container_number}`);
+  log(inCreate.data?.status === 'черновик' && inCreate.data?.responsible_name === 'Администратор',
+    'Документ получает статус «черновик» и ответственного по умолчанию', `responsible=${inCreate.data?.responsible_name}`);
+
+  const badKind = await req('POST', '/api/operations', { token: T, body: { kind: 'перемещение' } });
+  log(badKind.status === 400, 'Недопустимый тип документа → 400', `status=${badKind.status}`);
+  const badBasis = await req('POST', '/api/operations', { token: T, body: { kind: 'вывоз', basis_id: 999999 } });
+  log(badBasis.status === 400, 'Вывоз с несуществующим основанием → 400', `status=${badBasis.status}`);
+
+  // ---- Пропуск по документу ----
+  const opPass = await req('POST', `/api/operations/${inId}/pass`, { token: T, body: {} });
+  log(opPass.status === 201 && /^\d{9}$/.test(String(opPass.data?.code)) && opPass.data?.operation_id === inId,
+    'POST /api/operations/:id/pass (номер из 9 цифр, связь с документом)', `code=${opPass.data?.code}`);
+  const opPassAgain = await req('POST', `/api/operations/${inId}/pass`, { token: T, body: {} });
+  log(opPassAgain.status === 200 && opPassAgain.data?.id === opPass.data?.id,
+    'Повторный пропуск по документу не создаётся', `status=${opPassAgain.status}`);
+
+  const opCard = await req('GET', `/api/operations/${inId}`, { token: T });
+  log(opCard.status === 200 && opCard.data?.pass?.code === opPass.data?.code,
+    'GET /api/operations/:id отдаёт пропуск документа', `pass=${opCard.data?.pass?.code}`);
+
+  const opPatch = await req('PATCH', `/api/operations/${inId}`, { token: T, body: { status: 'оформлен', comment: 'Проверено тестом' } });
+  log(opPatch.status === 200 && opPatch.data?.status === 'оформлен', 'PATCH /api/operations/:id', `status=${opPatch.data?.status}`);
+  const opPatchBad = await req('PATCH', `/api/operations/${inId}`, { token: T, body: { status: 'нет-такого' } });
+  log(opPatchBad.status === 200 && opPatchBad.data?.status === 'оформлен',
+    'Недопустимый статус документа не применяется', `status=${opPatchBad.data?.status}`);
+
+  const opList = await req('GET', '/api/operations?kind=' + encodeURIComponent('завоз') + '&status=оформлен', { token: T });
+  log(opList.status === 200 && opList.data.some((o) => o.id === inId), 'GET /api/operations?kind=&status= (фильтры)', `count=${opList.data?.length}`);
+  const opSearch = await req('GET', '/api/operations?q=' + encodeURIComponent(cNum), { token: T });
+  log(opSearch.status === 200 && opSearch.data.some((o) => o.id === inId), 'GET /api/operations?q= (поиск по контейнеру)', `count=${opSearch.data?.length}`);
+
+  // ---- Расходная накладная ----
+  const invCreate = await req('POST', '/api/invoices', {
+    token: T,
+    body: { recipient_id: cpId, owner_id: cpId, proxy_no: '0-06-01-08/' + TS, proxy_person: 'Тестов Т.Т.', items: [{ operation_id: inId, qty: 2 }] }
+  });
+  log(invCreate.status === 201 && /^\d{9}$/.test(String(invCreate.data?.doc_no)),
+    'POST /api/invoices (номер из 9 цифр)', `doc_no=${invCreate.data?.doc_no}`);
+  const invId = invCreate.data?.id;
+  const firstItem = invCreate.data?.items?.[0];
+  log(firstItem?.container_number === cNum && firstItem?.category === '40 футовый' && firstItem?.basis_doc_no === inCreate.data?.doc_no,
+    'Строка накладной подтянула контейнер, категорию и основание', `container=${firstItem?.container_number}, category=${firstItem?.category}`);
+  log(invCreate.data?.items_qty === 2, 'Количество по строкам суммируется', `items_qty=${invCreate.data?.items_qty}`);
+  log(invCreate.data?.recipient_name === cpName, 'Получатель накладной подтянут из справочника', `recipient=${invCreate.data?.recipient_name}`);
+
+  const itemAdd = await req('POST', `/api/invoices/${invId}/items`, { token: T, body: { operation_id: inId, qty: 3 } });
+  log(itemAdd.status === 201 && itemAdd.data?.qty === 3, 'POST /api/invoices/:id/items', `status=${itemAdd.status}`);
+  const invFull = await req('GET', '/api/invoices/' + invId, { token: T });
+  log(invFull.status === 200 && invFull.data?.items?.length === 2 && invFull.data?.items_qty === 5,
+    'GET /api/invoices/:id (строки и итог)', `строк=${invFull.data?.items?.length}, qty=${invFull.data?.items_qty}`);
+  const invDelBad = await req('DELETE', `/api/invoices/${invId}/items/999999`, { token: T });
+  log(invDelBad.status === 404, 'Удаление несуществующей строки → 404', `status=${invDelBad.status}`);
+
+  // ---- Вывоз по строке накладной ----
+  const outbound = await req('POST', `/api/invoices/${invId}/items/${itemAdd.data?.id}/outbound`, {
+    token: T, body: { plate: '900 TEST 01', driver: 'ВЫВОЗ ВОДИТЕЛЬ' }
+  });
+  log(outbound.status === 201 && outbound.data?.kind === 'вывоз' && /^\d{9}$/.test(String(outbound.data?.doc_no)),
+    'POST /api/invoices/:id/items/:itemId/outbound (вывоз)', `doc_no=${outbound.data?.doc_no}`);
+  log(outbound.data?.basis_doc_no === inCreate.data?.doc_no && outbound.data?.invoice_no === invCreate.data?.doc_no,
+    'Вывоз ссылается на завоз-основание и накладную', `basis=${outbound.data?.basis_doc_no}, invoice=${outbound.data?.invoice_no}`);
+  log(outbound.data?.container_number === cNum && outbound.data?.container_category === '40 футовый',
+    'Вывоз наследует контейнер и категорию строки', `container=${outbound.data?.container_number}`);
+  log(outbound.data?.status === 'черновик' && outbound.data?.plate === '900 TEST 01',
+    'Госномер вывоза нормализован, статус — черновик', `plate=${outbound.data?.plate}`);
+
+  const invPatch = await req('PATCH', `/api/invoices/${invId}`, { token: T, body: { status: 'оформлена' } });
+  log(invPatch.status === 200 && invPatch.data?.status === 'оформлена', 'PATCH /api/invoices/:id', `status=${invPatch.data?.status}`);
+  const invTail = await req('GET', '/api/invoices?full=1', { token: T });
+  log(invTail.status === 200 && (invTail.data || []).some((i) => i.id === invId && Array.isArray(i.items)),
+    'GET /api/invoices?full=1 отдаёт строки', `count=${invTail.data?.length}`);
+
+  const statsDocs = await req('GET', '/api/stats', { token: T });
+  log(statsDocs.status === 200 && typeof statsDocs.data?.operationsOpen === 'number' && typeof statsDocs.data?.passesToday === 'number',
+    'GET /api/stats содержит метрики документооборота', `open=${statsDocs.data?.operationsOpen}, passes=${statsDocs.data?.passesToday}`);
+
+  console.log('\n===== 10.1. ПОЛЯ КАРТОЧКИ И «ДОБАВИТЬ ИЗ ОТПУСКА» =====');
+  const dictCargo = await req('GET', '/api/dictionaries', { token: T });
+  log(dictCargo.status === 200 && Array.isArray(dictCargo.data?.cargoStatuses) && dictCargo.data.cargoStatuses.includes('Порожний'),
+    'GET /api/dictionaries отдаёт словарь «Статус» груза', `cargoStatuses=${JSON.stringify(dictCargo.data?.cargoStatuses)}`);
+
+  const cardPatch = await req('PATCH', `/api/operations/${inId}`, {
+    token: T,
+    body: { cargo_status: 'Порожний', transferred: true, plate: '616 BCR05', transport_mode: 'Железной дорогой' }
+  });
+  log(cardPatch.status === 200 && cardPatch.data?.cargo_status === 'Порожний' && cardPatch.data?.transferred === 1
+    && cardPatch.data?.plate === '616 BCR05' && cardPatch.data?.transport_mode === 'Железной дорогой',
+    'PATCH карточки: «Статус» груза, «Передан», «Номер машины», «Способ тр-ки»',
+    `cargo=${cardPatch.data?.cargo_status}, transferred=${cardPatch.data?.transferred}`);
+
+  const cardPatchBad = await req('PATCH', `/api/operations/${inId}`, { token: T, body: { cargo_status: 'Что-то своё' } });
+  log(cardPatchBad.status === 200 && cardPatchBad.data?.cargo_status === 'Порожний',
+    'Недопустимый «Статус» груза → fallback «Порожний»', `cargo=${cardPatchBad.data?.cargo_status}`);
+
+  const in2 = await req('POST', '/api/operations', {
+    token: T,
+    body: { kind: 'завоз', plate: '777 ABC 02', cargo_status: 'Груженный', container_id: cId }
+  });
+  const in2Id = in2.data?.id;
+  log(in2.status === 201 && in2.data?.cargo_status === 'Груженный',
+    'POST /api/operations с «Статусом» груза', `cargo=${in2.data?.cargo_status}`);
+
+  const invBulk = await req('POST', '/api/invoices', { token: T, body: { proxy_person: 'Тестов Т.Т.', items: [] } });
+  const invBulkId = invBulk.data?.id;
+  log(invBulk.status === 201 && !!invBulkId, 'POST /api/invoices (пустая шапка под подбор строк)', `status=${invBulk.status}`);
+
+  const bulkEmpty = await req('POST', `/api/invoices/${invBulkId}/items/bulk`, { token: T, body: { operation_ids: [] } });
+  log(bulkEmpty.status === 400, '«Добавить из отпуска» без выбранных документов → 400', `status=${bulkEmpty.status}`);
+
+  const bulk = await req('POST', `/api/invoices/${invBulkId}/items/bulk`, { token: T, body: { operation_ids: [inId, in2Id] } });
+  log(bulk.status === 201 && bulk.data?.added === 2,
+    'POST /api/invoices/:id/items/bulk («Добавить из отпуска»)', `added=${bulk.data?.added}`);
+
+  const bulkCard = await req('GET', '/api/invoices/' + invBulkId, { token: T });
+  log(bulkCard.status === 200 && bulkCard.data?.items?.length === 2
+    && bulkCard.data.items.some((it) => it.cargo_kind === 'Порожний контейнер')
+    && bulkCard.data.items.every((it) => !!it.basis_doc_no),
+    'Строки подбора: вид груза и связь с документом основанием',
+    `строк=${bulkCard.data?.items?.length}`);
+
+  const bulkBad = await req('POST', `/api/invoices/${invBulkId}/items/bulk`, { token: T, body: { operation_ids: [999999] } });
+  log(bulkBad.status === 400, '«Добавить из отпуска» по несуществующим документам → 400', `status=${bulkBad.status}`);
+
+  const bulk404 = await req('POST', '/api/invoices/999999/items/bulk', { token: T, body: { operation_ids: [inId] } });
+  log(bulk404.status === 404, '«Добавить из отпуска» в несуществующую накладную → 404', `status=${bulk404.status}`);
+
+  console.log('\n===== 11. RBAC (разграничение доступа) =====');
   async function login(login, p) { const r = await req('POST', '/api/auth', { body: { login, pass: p } }); return r.data?.token; }
   const TG = await login('guard', 'guard123');
+  const guardBulk = await req('POST', `/api/invoices/${invBulkId}/items/bulk`, { token: TG, body: { operation_ids: [] } });
+  log(guardBulk.status === 403, 'guard НЕ может «Добавить из отпуска» → 403', `status=${guardBulk.status}`);
   const TC = await login('client', 'client123');
   const TD = await login('driver', 'driver123');
-  log(!!TG && !!TC && !!TD, 'Вход guard / client / driver');
+  const TF = await login('finance', 'fin123');
+  log(!!TG && !!TC && !!TD && !!TF, 'Вход guard / client / driver / finance');
 
   const guardWagon = await req('POST', '/api/wagons', { token: TG, body: { number: 'X' + TS } });
   log(guardWagon.status === 403, 'guard НЕ может создавать вагоны → 403', `status=${guardWagon.status}`);
@@ -239,6 +427,39 @@ const TS = Date.now().toString().slice(-6);
 
   const driverWagon = await req('POST', '/api/wagons', { token: TD, body: { number: 'Y' + TS } });
   log(driverWagon.status === 403, 'driver НЕ может создавать вагоны → 403', `status=${driverWagon.status}`);
+
+  // --- RBAC документооборота ---
+  const guardInvoice = await req('POST', '/api/invoices', { token: TG, body: { items: [] } });
+  log(guardInvoice.status === 403, 'guard НЕ может создавать накладные → 403', `status=${guardInvoice.status}`);
+
+  const guardWarehouse = await req('POST', '/api/warehouses', { token: TG, body: { name: 'Склад RBAC-' + TS } });
+  log(guardWarehouse.status === 403, 'guard НЕ может менять справочник складов → 403', `status=${guardWarehouse.status}`);
+
+  // Начальник смены: контрагенты — можно, склады — нельзя (кнопки в UI скрыты по тому же признаку).
+  const TSH = await login('shift', 'shift123');
+  const shiftWarehouse = await req('POST', '/api/warehouses', { token: TSH, body: { name: 'Склад СМЕНА-' + TS } });
+  log(shiftWarehouse.status === 403, 'shift НЕ может создавать склады → 403', `status=${shiftWarehouse.status}`);
+  const shiftCounterparty = await req('POST', '/api/counterparties', { token: TSH, body: { name: 'ТОО «СМЕНА-' + TS + '»', kind: 'получатель' } });
+  log(shiftCounterparty.status === 201, 'shift МОЖЕТ создавать контрагентов → 201', `status=${shiftCounterparty.status}`);
+
+  const clientOps = await req('POST', '/api/operations', { token: TC, body: { kind: 'завоз' } });
+  log(clientOps.status === 403, 'client НЕ может создавать завоз/вывоз → 403', `status=${clientOps.status}`);
+
+  const clientDict = await req('GET', '/api/dictionaries', { token: TC });
+  log(clientDict.status === 200, 'client видит справочники (роли, склады) → 200', `status=${clientDict.status}`);
+
+  const financeOps = await req('POST', '/api/operations', { token: TF, body: { kind: 'завоз' } });
+  log(financeOps.status === 403, 'finance НЕ может создавать завоз/вывоз → 403', `status=${financeOps.status}`);
+
+  const financeInvoice = await req('POST', '/api/invoices', { token: TF, body: { items: [] } });
+  log(financeInvoice.status === 201 && /^\d{9}$/.test(String(financeInvoice.data?.doc_no)),
+    'finance МОЖЕТ создавать накладные → 201', `doc_no=${financeInvoice.data?.doc_no}`);
+
+  const guardCard = await req('GET', '/api/operations/' + inId, { token: TG });
+  log(guardCard.status === 200, 'guard видит карточку документа завоза → 200', `status=${guardCard.status}`);
+
+  const driverPass = await req('POST', `/api/operations/${inId}/pass`, { token: TD, body: {} });
+  log(driverPass.status === 403, 'driver НЕ может вводить пропуск → 403', `status=${driverPass.status}`);
 
   // client видит только свои заявки
   const clientAuth = await req('POST', '/api/auth', { body: { login: 'client', pass: 'client123' } });

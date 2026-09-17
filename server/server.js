@@ -126,6 +126,59 @@ function emitUpdate(event, data) {
   io.to('terminal').emit(event, data);
 }
 
+// ---------- Документооборот: справочные значения ----------
+// Организация терминала по умолчанию — как в шапках документов из образцов работы.
+const DEFAULT_ORG = 'ТОО "International Logistics Corporation"';
+
+const OPERATION_KINDS = ['завоз', 'вывоз'];
+const OPERATION_STATUSES = ['черновик', 'оформлен', 'завершён', 'отменён'];
+const INVOICE_STATUSES = ['черновик', 'оформлена', 'закрыта'];
+const TRANSPORT_MODES = ['Автотранспортом', 'Железной дорогой'];
+const COUNTERPARTY_KINDS = ['организация', 'контрагент', 'собственник', 'получатель', 'перевозчик'];
+const PASS_TYPES = ['разовый', 'постоянный'];
+// «Статус» груза в карточке документа — как в образце: Порожний / Груженный.
+const CARGO_STATUSES = ['Порожний', 'Груженный', 'Груженный (реф)'];
+
+// Разрядность номеров как в образцах: Завоз 06859, Вывоз 000014639,
+// Расходная накладная 000004853, Пропуск 000020129
+const DOC_NUMBER_WIDTH = { 'завоз': 5, 'вывоз': 9, 'накладная': 9, 'пропуск': 9 };
+
+const nextDocNoTx = db.transaction((scope) => {
+  const width = DOC_NUMBER_WIDTH[scope] || 9;
+  const row = db.prepare('SELECT last_no FROM doc_seq WHERE scope = ?').get(scope);
+  const next = (row ? row.last_no : 0) + 1;
+  if (row) db.prepare('UPDATE doc_seq SET last_no = ? WHERE scope = ?').run(next, scope);
+  else db.prepare('INSERT INTO doc_seq (scope, last_no) VALUES (?,?)').run(scope, next);
+  return String(next).padStart(width, '0');
+});
+
+function docNo(scope) {
+  return nextDocNoTx(scope);
+}
+
+// Белый список полей: наружу и в базу уходит только перечисленное.
+function pick(body, fields) {
+  const out = {};
+  for (const f of fields) {
+    if (body && body[f] !== undefined) out[f] = body[f];
+  }
+  return out;
+}
+
+function intOrNull(v) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// Значение из фиксированного списка — защита от произвольных статусов в базе.
+function oneOf(value, allowed, fallback) {
+  return allowed.indexOf(value) >= 0 ? value : fallback;
+}
+
+function nowStamp() {
+  return new Date().toISOString().slice(0, 19).replace('T', ' ');
+}
+
 // ---------- AUTH ----------
 app.post('/api/auth', authLimiter, (req, res) => {
   const { login, pass } = req.body || {};
@@ -175,7 +228,16 @@ app.get('/api/stats', authRequired, (_, res) => {
   const vehicles = db.prepare("SELECT COUNT(*) c FROM vehicles WHERE status='на_территории'").get().c;
   const queue = db.prepare("SELECT COUNT(*) c FROM queue WHERE status='ожидание'").get().c;
   const requestsNew = db.prepare("SELECT COUNT(*) c FROM requests WHERE status='новая'").get().c;
-  res.json({ containers, containersFull, wagons, wagonsOnTrack, equipment, eqFree, vehicles, queue, requestsNew });
+  // Документооборот: завоз/вывоз в работе и накладные за сутки
+  const operationsOpen = db.prepare("SELECT COUNT(*) c FROM operations WHERE status IN ('черновик','оформлен')").get().c;
+  const operationsIn = db.prepare("SELECT COUNT(*) c FROM operations WHERE kind='завоз' AND date(op_date)=date('now')").get().c;
+  const operationsOut = db.prepare("SELECT COUNT(*) c FROM operations WHERE kind='вывоз' AND date(op_date)=date('now')").get().c;
+  const invoicesToday = db.prepare("SELECT COUNT(*) c FROM invoices WHERE date(doc_date)=date('now')").get().c;
+  const passesToday = db.prepare("SELECT COUNT(*) c FROM passes WHERE date(created_at)=date('now')").get().c;
+  res.json({
+    containers, containersFull, wagons, wagonsOnTrack, equipment, eqFree, vehicles, queue, requestsNew,
+    operationsOpen, operationsIn, operationsOut, invoicesToday, passesToday
+  });
 });
 
 // ---------- КОНТЕЙНЕРЫ ----------
@@ -410,13 +472,21 @@ app.get('/api/passes', authRequired, roleRequired('admin', 'guard', 'dispatcher'
 });
 
 app.post('/api/passes', authRequired, roleRequired('admin', 'guard', 'dispatcher', 'shift'), (req, res) => {
-  const { plate, type } = req.body || {};
+  const { plate, type, operation_id } = req.body || {};
   if (!plate) return res.status(400).json({ err: 'Укажите госномер' });
-  const code = 'PASS-' + Date.now().toString(36).toUpperCase();
-  const info = db.prepare('INSERT INTO passes (code, plate, type) VALUES (?,?,?)')
-    .run(code, String(plate).trim().toUpperCase(), String(type || 'разовый'));
+  const opId = intOrNull(operation_id);
+  const op = opId ? db.prepare('SELECT * FROM operations WHERE id = ?').get(opId) : null;
+  // Нумерация пропусков сквозная, как в журнале терминала: Пропуск 000020129
+  const code = docNo('пропуск');
+  const info = db.prepare(
+    "INSERT INTO passes (code, plate, type, operation_id, doc_date) VALUES (?,?,?,?,datetime('now'))"
+  ).run(code, String(plate).trim().toUpperCase(), oneOf(type, PASS_TYPES, 'разовый'), op ? op.id : null);
   const p = db.prepare('SELECT * FROM passes WHERE id = ?').get(info.lastInsertRowid);
-  logAction(req, 'pass:create', 'Пропуск ' + p.code + ' для ' + p.plate);
+  if (op) {
+    db.prepare("UPDATE operations SET pass_id = ?, updated_at = datetime('now') WHERE id = ?").run(p.id, op.id);
+  }
+  logAction(req, 'pass:create', 'Пропуск ' + p.code + ' для ' + p.plate + (op ? ' (' + op.doc_no + ')' : ''));
+  emitUpdate('pass:update', p);
   res.status(201).json(p);
 });
 
@@ -499,6 +569,512 @@ app.get('/api/report/wagons', authRequired, roleRequired('admin', 'director', 'f
 app.post('/api/upload-photo', authRequired, upload.single('photo'), (req, res) => {
   if (!req.file) return res.status(400).json({ err: 'Файл не загружен' });
   res.json({ url: '/uploads/' + req.file.filename });
+});
+
+// ============================================================
+// СПРАВОЧНИКИ (склады, контрагенты, ответственные)
+// ============================================================
+// Один запрос отдаёт всё, что нужно формам документов: склады, контрагентов,
+// ответственных и допустимые значения справочников.
+app.get('/api/dictionaries', authRequired, (req, res) => {
+  const staff = db.prepare(
+    "SELECT id, name, role FROM users WHERE active = 1 AND role NOT IN ('client', 'driver') ORDER BY name"
+  ).all();
+  res.json({
+    org: DEFAULT_ORG,
+    warehouses: db.prepare('SELECT * FROM warehouses WHERE active = 1 ORDER BY name').all(),
+    counterparties: db.prepare('SELECT * FROM counterparties WHERE active = 1 ORDER BY name').all(),
+    responsible: staff,
+    counterpartyKinds: COUNTERPARTY_KINDS,
+    operationKinds: OPERATION_KINDS,
+    operationStatuses: OPERATION_STATUSES,
+    invoiceStatuses: INVOICE_STATUSES,
+    transportModes: TRANSPORT_MODES,
+    cargoStatuses: CARGO_STATUSES,
+    passTypes: PASS_TYPES
+  });
+});
+
+app.get('/api/warehouses', authRequired, (_, res) => {
+  res.json(db.prepare('SELECT * FROM warehouses ORDER BY name').all());
+});
+
+app.post('/api/warehouses', authRequired, roleRequired('admin', 'dispatcher'), (req, res) => {
+  const { name, code } = req.body || {};
+  if (!name) return res.status(400).json({ err: 'Укажите название склада' });
+  try {
+    const info = db.prepare('INSERT INTO warehouses (name, code) VALUES (?,?)')
+      .run(String(name).trim(), String(code || '').trim());
+    const w = db.prepare('SELECT * FROM warehouses WHERE id = ?').get(info.lastInsertRowid);
+    logAction(req, 'warehouse:create', 'Склад ' + w.name);
+    emitUpdate('dictionary:update', { kind: 'warehouse', id: w.id });
+    res.status(201).json(w);
+  } catch (e) {
+    res.status(409).json({ err: 'Такой склад уже есть' });
+  }
+});
+
+app.get('/api/counterparties', authRequired, (_, res) => {
+  res.json(db.prepare('SELECT * FROM counterparties ORDER BY name').all());
+});
+
+app.post('/api/counterparties', authRequired, roleRequired('admin', 'dispatcher', 'shift'), (req, res) => {
+  const { name, kind, bin, contact } = req.body || {};
+  if (!name) return res.status(400).json({ err: 'Укажите название контрагента' });
+  try {
+    const info = db.prepare('INSERT INTO counterparties (name, kind, bin, contact) VALUES (?,?,?,?)')
+      .run(
+        String(name).trim(),
+        oneOf(kind, COUNTERPARTY_KINDS, 'контрагент'),
+        String(bin || '').trim(),
+        String(contact || '').trim()
+      );
+    const c = db.prepare('SELECT * FROM counterparties WHERE id = ?').get(info.lastInsertRowid);
+    logAction(req, 'counterparty:create', 'Контрагент ' + c.name);
+    emitUpdate('dictionary:update', { kind: 'counterparty', id: c.id });
+    res.status(201).json(c);
+  } catch (e) {
+    res.status(409).json({ err: 'Такой контрагент уже есть' });
+  }
+});
+
+// ============================================================
+// ЗАВОЗ / ВЫВОЗ (operations)
+// ============================================================
+const OPERATION_SELECT = `
+  SELECT o.*,
+         cp.name AS counterparty_name,
+         ow.name AS owner_name,
+         rc.name AS recipient_name,
+         wh.name AS warehouse_name,
+         c.number AS container_number,
+         c.type AS container_type,
+         w.number AS wagon_number,
+         u.name AS responsible_name,
+         p.code AS pass_code,
+         i.doc_no AS invoice_no,
+         b.doc_no AS basis_doc_no,
+         b.kind AS basis_kind
+  FROM operations o
+  LEFT JOIN counterparties cp ON cp.id = o.counterparty_id
+  LEFT JOIN counterparties ow ON ow.id = o.owner_id
+  LEFT JOIN counterparties rc ON rc.id = o.recipient_id
+  LEFT JOIN warehouses wh ON wh.id = o.warehouse_id
+  LEFT JOIN containers c ON c.id = o.container_id
+  LEFT JOIN wagons w ON w.id = o.wagon_id
+  LEFT JOIN users u ON u.id = o.responsible_id
+  LEFT JOIN passes p ON p.id = o.pass_id
+  LEFT JOIN invoices i ON i.id = o.invoice_id
+  LEFT JOIN operations b ON b.id = o.basis_id
+`;
+
+function getOperation(id) {
+  return db.prepare(OPERATION_SELECT + ' WHERE o.id = ?').get(Number(id));
+}
+
+app.get('/api/operations', authRequired, (req, res) => {
+  const kind = req.query.kind;
+  const status = req.query.status;
+  const q = String(req.query.q || '').trim().toLowerCase();
+  let sql = OPERATION_SELECT + ' WHERE 1 = 1';
+  const params = [];
+  if (OPERATION_KINDS.indexOf(kind) >= 0) { sql += ' AND o.kind = ?'; params.push(kind); }
+  if (OPERATION_STATUSES.indexOf(status) >= 0) { sql += ' AND o.status = ?'; params.push(status); }
+  if (q) {
+    sql += " AND (LOWER(o.doc_no) LIKE ? OR LOWER(COALESCE(c.number,'')) LIKE ? OR LOWER(COALESCE(o.plate,'')) LIKE ? OR LOWER(COALESCE(o.driver,'')) LIKE ?)";
+    const like = '%' + q + '%';
+    params.push(like, like, like, like);
+  }
+  sql += ' ORDER BY o.id DESC LIMIT 300';
+  res.json(db.prepare(sql).all(...params));
+});
+
+app.get('/api/operations/:id', authRequired, (req, res) => {
+  const op = getOperation(req.params.id);
+  if (!op) return res.status(404).json({ err: 'Документ не найден' });
+  op.pass = op.pass_id ? db.prepare('SELECT * FROM passes WHERE id = ?').get(op.pass_id) : null;
+  op.invoice = op.invoice_id ? db.prepare('SELECT * FROM invoices WHERE id = ?').get(op.invoice_id) : null;
+  op.items = db.prepare('SELECT * FROM invoice_items WHERE operation_id = ?').all(op.id);
+  res.json(op);
+});
+
+// Общие поля документа — используются и при создании, и при изменении.
+const OPERATION_FIELDS = [
+  'op_date', 'org', 'counterparty_id', 'owner_id', 'recipient_id', 'warehouse_id',
+  'movement', 'transport_mode', 'cargo_status', 'status', 'container_id', 'container_category',
+  'seal_no', 'plate', 'driver', 'wagon_id', 'wagon_kind', 'ignore_wagon', 'transferred',
+  'basis_id', 'responsible_id', 'comment'
+];
+
+const OPERATION_REF_FIELDS = [
+  'counterparty_id', 'owner_id', 'recipient_id', 'warehouse_id',
+  'container_id', 'wagon_id', 'basis_id', 'responsible_id'
+];
+
+// Приведение полей документа к ожидаемым типам с проверкой по справочникам значений.
+function normalizeOperationFields(raw, current) {
+  const out = {};
+  for (const key of Object.keys(raw)) {
+    const value = raw[key];
+    if (OPERATION_REF_FIELDS.indexOf(key) >= 0) out[key] = intOrNull(value);
+    else if (key === 'status') out[key] = oneOf(value, OPERATION_STATUSES, current ? current.status : 'черновик');
+    else if (key === 'transport_mode') out[key] = oneOf(value, TRANSPORT_MODES, current ? current.transport_mode : 'Автотранспортом');
+    else if (key === 'cargo_status') out[key] = value ? oneOf(value, CARGO_STATUSES, CARGO_STATUSES[0]) : '';
+    else if (key === 'ignore_wagon' || key === 'transferred') out[key] = value ? 1 : 0;
+    else if (key === 'plate') out[key] = String(value || '').trim().toUpperCase();
+    else out[key] = value === null ? '' : String(value);
+  }
+  return out;
+}
+
+app.post('/api/operations', authRequired, roleRequired('admin', 'dispatcher', 'receiver', 'guard', 'shift', 'ppjt'), (req, res) => {
+  const body = req.body || {};
+  const kind = oneOf(body.kind, OPERATION_KINDS, null);
+  if (!kind) return res.status(400).json({ err: 'Тип документа должен быть «завоз» или «вывоз»' });
+
+  const fields = normalizeOperationFields(pick(body, OPERATION_FIELDS), null);
+  const basis = fields.basis_id ? db.prepare('SELECT * FROM operations WHERE id = ?').get(fields.basis_id) : null;
+  if (fields.basis_id && !basis) return res.status(400).json({ err: 'Документ-основание не найден' });
+  // Вывоз оформляется по завозу, поэтому основание обязано быть завозом.
+  if (basis && basis.kind !== 'завоз') return res.status(400).json({ err: 'Документ-основание должен быть завозом' });
+
+  const containerId = fields.container_id || (basis ? basis.container_id : null);
+  const movement = fields.movement || (kind === 'завоз' ? 'Завоз гружёный' : 'Вывоз гружёный');
+
+  const info = db.prepare(`
+    INSERT INTO operations
+      (doc_no, kind, op_date, org, counterparty_id, owner_id, recipient_id, warehouse_id, movement,
+       transport_mode, cargo_status, status, container_id, container_category, seal_no, plate, driver, wagon_id,
+       wagon_kind, ignore_wagon, transferred, basis_id, responsible_id, comment)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    docNo(kind),
+    kind,
+    String(fields.op_date || nowStamp()),
+    String(fields.org || DEFAULT_ORG),
+    fields.counterparty_id || null,
+    fields.owner_id || null,
+    fields.recipient_id || null,
+    fields.warehouse_id || null,
+    String(movement),
+    fields.transport_mode || 'Автотранспортом',
+    String(fields.cargo_status || (basis ? basis.cargo_status : '') || ''),
+    fields.status || 'черновик',
+    containerId || null,
+    String(fields.container_category || (basis ? basis.container_category : '20 футовый')),
+    String(fields.seal_no || ''),
+    String(fields.plate || (basis ? basis.plate : '')),
+    String(fields.driver || ''),
+    fields.wagon_id || null,
+    String(fields.wagon_kind || (basis ? basis.wagon_kind : '')),
+    fields.ignore_wagon ? 1 : 0,
+    fields.transferred ? 1 : 0,
+    basis ? basis.id : null,
+    fields.responsible_id || req.user.id,
+    String(fields.comment || '')
+  );
+
+  const op = getOperation(info.lastInsertRowid);
+  logAction(req, 'operation:create', op.kind + ' ' + op.doc_no + (op.container_number ? ' · ' + op.container_number : ''));
+  emitUpdate('operation:update', op);
+  res.status(201).json(op);
+});
+
+app.patch('/api/operations/:id', authRequired, roleRequired('admin', 'dispatcher', 'receiver', 'guard', 'shift', 'ppjt'), (req, res) => {
+  const op = db.prepare('SELECT * FROM operations WHERE id = ?').get(Number(req.params.id));
+  if (!op) return res.status(404).json({ err: 'Документ не найден' });
+
+  const normalized = normalizeOperationFields(pick(req.body || {}, OPERATION_FIELDS), op);
+  const keys = Object.keys(normalized);
+  if (!keys.length) return res.status(400).json({ err: 'Нет полей для изменения' });
+
+  const setClause = keys.map((k) => k + ' = ?').join(', ');
+  const values = keys.map((k) => normalized[k]);
+  db.prepare(`UPDATE operations SET ${setClause}, updated_at = datetime('now') WHERE id = ?`).run(...values, op.id);
+
+  const updated = getOperation(op.id);
+  logAction(req, 'operation:update', updated.kind + ' ' + updated.doc_no + ' → ' + updated.status);
+  emitUpdate('operation:update', updated);
+  res.json(updated);
+});
+
+// «Ввести пропуск»: пропуск выпускается по документу и связывается с ним.
+app.post('/api/operations/:id/pass', authRequired, roleRequired('admin', 'guard', 'dispatcher', 'shift'), (req, res) => {
+  const op = db.prepare('SELECT * FROM operations WHERE id = ?').get(Number(req.params.id));
+  if (!op) return res.status(404).json({ err: 'Документ не найден' });
+  if (op.pass_id) return res.json(db.prepare('SELECT * FROM passes WHERE id = ?').get(op.pass_id));
+  if (!op.plate) return res.status(400).json({ err: 'В документе не указан госномер' });
+
+  const code = docNo('пропуск');
+  const info = db.prepare(
+    "INSERT INTO passes (code, plate, type, operation_id, doc_date) VALUES (?,?,?,?,datetime('now'))"
+  ).run(code, op.plate, oneOf(req.body && req.body.type, PASS_TYPES, 'разовый'), op.id);
+  db.prepare("UPDATE operations SET pass_id = ?, updated_at = datetime('now') WHERE id = ?")
+    .run(info.lastInsertRowid, op.id);
+
+  const p = db.prepare('SELECT * FROM passes WHERE id = ?').get(info.lastInsertRowid);
+  logAction(req, 'pass:create', 'Пропуск ' + p.code + ' для ' + p.plate + ' (' + op.doc_no + ')');
+  emitUpdate('pass:update', p);
+  emitUpdate('operation:update', getOperation(op.id));
+  res.status(201).json(p);
+});
+
+// ============================================================
+// РАСХОДНЫЕ НАКЛАДНЫЕ (шапка + строки)
+// ============================================================
+const INVOICE_SELECT = `
+  SELECT i.*,
+         rc.name AS recipient_name,
+         ow.name AS owner_name,
+         u.name AS responsible_name,
+         (SELECT COUNT(*) FROM invoice_items it WHERE it.invoice_id = i.id) AS items_count,
+         (SELECT COALESCE(SUM(it.qty), 0) FROM invoice_items it WHERE it.invoice_id = i.id) AS items_qty
+  FROM invoices i
+  LEFT JOIN counterparties rc ON rc.id = i.recipient_id
+  LEFT JOIN counterparties ow ON ow.id = i.owner_id
+  LEFT JOIN users u ON u.id = i.responsible_id
+`;
+
+const ITEM_SELECT = `
+  SELECT it.*,
+         wh.name AS warehouse_name,
+         o.doc_no AS basis_doc_no,
+         o.kind AS basis_kind,
+         o.status AS basis_status
+  FROM invoice_items it
+  LEFT JOIN warehouses wh ON wh.id = it.warehouse_id
+  LEFT JOIN operations o ON o.id = it.operation_id
+`;
+
+function getInvoice(id) {
+  const inv = db.prepare(INVOICE_SELECT + ' WHERE i.id = ?').get(Number(id));
+  if (!inv) return null;
+  inv.items = db.prepare(ITEM_SELECT + ' WHERE it.invoice_id = ? ORDER BY it.id').all(inv.id);
+  return inv;
+}
+
+// Строка накладной: если указан документ-основание (завоз), контейнер,
+// категория и склад подтягиваются из него автоматически.
+function insertInvoiceItem(invoiceId, raw) {
+  const item = raw || {};
+  const basisId = intOrNull(item.operation_id);
+  const op = basisId ? db.prepare('SELECT * FROM operations WHERE id = ?').get(basisId) : null;
+  const containerId = intOrNull(item.container_id) || (op ? op.container_id : null);
+  const container = containerId ? db.prepare('SELECT * FROM containers WHERE id = ?').get(containerId) : null;
+  const qty = Number(item.qty);
+  const info = db.prepare(`
+    INSERT INTO invoice_items
+      (invoice_id, operation_id, container_id, container_number, cargo_kind, category, unit, qty, warehouse_id, comment)
+    VALUES (?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    invoiceId,
+    op ? op.id : null,
+    containerId || null,
+    String(item.container_number || (container ? container.number : '')).trim(),
+    String(item.cargo_kind || 'Груженный контейнер'),
+    String(item.category || (op ? op.container_category : '20 футовый')),
+    String(item.unit || 'шт'),
+    Number.isFinite(qty) && qty > 0 ? qty : 1,
+    intOrNull(item.warehouse_id) || (op ? op.warehouse_id : null),
+    String(item.comment || '')
+  );
+  return db.prepare(ITEM_SELECT + ' WHERE it.id = ?').get(info.lastInsertRowid);
+}
+
+app.get('/api/invoices', authRequired, (req, res) => {
+  const rows = db.prepare(INVOICE_SELECT + ' ORDER BY i.id DESC LIMIT 200').all();
+  if (String(req.query.full || '') === '1') {
+    for (const row of rows) {
+      row.items = db.prepare(ITEM_SELECT + ' WHERE it.invoice_id = ? ORDER BY it.id').all(row.id);
+    }
+  }
+  res.json(rows);
+});
+
+app.get('/api/invoices/:id', authRequired, (req, res) => {
+  const inv = getInvoice(req.params.id);
+  if (!inv) return res.status(404).json({ err: 'Накладная не найдена' });
+  res.json(inv);
+});
+
+const INVOICE_FIELDS = [
+  'doc_date', 'org', 'recipient_id', 'owner_id', 'proxy_no', 'proxy_from', 'proxy_to',
+  'proxy_person', 'proxy_individual', 'basis_doc', 'status', 'responsible_id', 'comment'
+];
+const INVOICE_REF_FIELDS = ['recipient_id', 'owner_id', 'responsible_id'];
+
+function normalizeInvoiceFields(raw, current) {
+  const out = {};
+  for (const key of Object.keys(raw)) {
+    const value = raw[key];
+    if (INVOICE_REF_FIELDS.indexOf(key) >= 0) out[key] = intOrNull(value);
+    else if (key === 'status') out[key] = oneOf(value, INVOICE_STATUSES, current ? current.status : 'черновик');
+    else if (key === 'proxy_individual') out[key] = value ? 1 : 0;
+    else out[key] = value === null ? '' : String(value);
+  }
+  return out;
+}
+
+app.post('/api/invoices', authRequired, roleRequired('admin', 'dispatcher', 'finance', 'shift'), (req, res) => {
+  const body = req.body || {};
+  const fields = normalizeInvoiceFields(pick(body, INVOICE_FIELDS), null);
+  const items = Array.isArray(body.items) ? body.items : [];
+
+  const invoiceId = db.transaction(() => {
+    const info = db.prepare(`
+      INSERT INTO invoices
+        (doc_no, doc_date, org, recipient_id, owner_id, proxy_no, proxy_from, proxy_to,
+         proxy_person, proxy_individual, basis_doc, status, responsible_id, comment)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      docNo('накладная'),
+      String(fields.doc_date || nowStamp()),
+      String(fields.org || DEFAULT_ORG),
+      fields.recipient_id || null,
+      fields.owner_id || null,
+      String(fields.proxy_no || ''),
+      String(fields.proxy_from || ''),
+      String(fields.proxy_to || ''),
+      String(fields.proxy_person || ''),
+      fields.proxy_individual ? 1 : 0,
+      String(fields.basis_doc || ''),
+      fields.status || 'черновик',
+      fields.responsible_id || req.user.id,
+      String(fields.comment || '')
+    );
+    for (const item of items) insertInvoiceItem(info.lastInsertRowid, item);
+    return info.lastInsertRowid;
+  })();
+
+  const inv = getInvoice(invoiceId);
+  logAction(req, 'invoice:create', 'Расходная накладная ' + inv.doc_no + ' · строк: ' + inv.items.length);
+  emitUpdate('invoice:update', inv);
+  res.status(201).json(inv);
+});
+
+app.patch('/api/invoices/:id', authRequired, roleRequired('admin', 'dispatcher', 'finance', 'shift'), (req, res) => {
+  const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(Number(req.params.id));
+  if (!inv) return res.status(404).json({ err: 'Накладная не найдена' });
+
+  const normalized = normalizeInvoiceFields(pick(req.body || {}, INVOICE_FIELDS), inv);
+  const keys = Object.keys(normalized);
+  if (!keys.length) return res.status(400).json({ err: 'Нет полей для изменения' });
+
+  const setClause = keys.map((k) => k + ' = ?').join(', ');
+  const values = keys.map((k) => normalized[k]);
+  db.prepare(`UPDATE invoices SET ${setClause}, updated_at = datetime('now') WHERE id = ?`).run(...values, inv.id);
+
+  const updated = getInvoice(inv.id);
+  logAction(req, 'invoice:update', 'Накладная ' + updated.doc_no + ' → ' + updated.status);
+  emitUpdate('invoice:update', updated);
+  res.json(updated);
+});
+
+app.post('/api/invoices/:id/items', authRequired, roleRequired('admin', 'dispatcher', 'shift'), (req, res) => {
+  const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(Number(req.params.id));
+  if (!inv) return res.status(404).json({ err: 'Накладная не найдена' });
+  const item = insertInvoiceItem(inv.id, req.body || {});
+  logAction(req, 'invoice:item-add', 'Накладная ' + inv.doc_no + ' · ' + (item.container_number || 'строка ' + item.id));
+  emitUpdate('invoice:update', getInvoice(inv.id));
+  res.status(201).json(item);
+});
+
+// «Добавить из отпуска»: пакетно добавляем строки по выбранным документам завоза —
+// контейнер, категория, склад и вид груза берутся из самого документа завоза.
+app.post('/api/invoices/:id/items/bulk', authRequired, roleRequired('admin', 'dispatcher', 'shift'), (req, res) => {
+  const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(Number(req.params.id));
+  if (!inv) return res.status(404).json({ err: 'Накладная не найдена' });
+  const ids = Array.isArray(req.body && req.body.operation_ids)
+    ? req.body.operation_ids.map((v) => Number(v)).filter((v) => Number.isFinite(v) && v > 0)
+    : [];
+  if (!ids.length) return res.status(400).json({ err: 'Выберите документы завоза' });
+
+  const added = db.transaction(() => {
+    const out = [];
+    for (const id of ids) {
+      const op = db.prepare('SELECT * FROM operations WHERE id = ?').get(id);
+      if (!op || op.kind !== 'завоз') continue;
+      out.push(insertInvoiceItem(inv.id, {
+        operation_id: op.id,
+        container_id: op.container_id,
+        cargo_kind: op.cargo_status === 'Порожний' ? 'Порожний контейнер' : 'Груженный контейнер',
+        category: op.container_category,
+        unit: 'шт',
+        qty: 1,
+        warehouse_id: op.warehouse_id,
+        comment: 'из завоза ' + op.doc_no
+      }));
+    }
+    return out;
+  })();
+
+  if (!added.length) return res.status(400).json({ err: 'Подходящих документов завоза не найдено' });
+  logAction(req, 'invoice:items-bulk', 'Накладная ' + inv.doc_no + ' · добавлено строк: ' + added.length);
+  emitUpdate('invoice:update', getInvoice(inv.id));
+  res.status(201).json({ added: added.length, items: added });
+});
+
+app.delete('/api/invoices/:id/items/:itemId', authRequired, roleRequired('admin', 'dispatcher', 'shift'), (req, res) => {
+  const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(Number(req.params.id));
+  if (!inv) return res.status(404).json({ err: 'Накладная не найдена' });
+  const info = db.prepare('DELETE FROM invoice_items WHERE id = ? AND invoice_id = ?')
+    .run(Number(req.params.itemId), inv.id);
+  if (!info.changes) return res.status(404).json({ err: 'Строка не найдена' });
+  logAction(req, 'invoice:item-delete', 'Накладная ' + inv.doc_no + ' · строка ' + req.params.itemId);
+  emitUpdate('invoice:update', getInvoice(inv.id));
+  res.json({ ok: true });
+});
+
+// «Создать вывоз по текущей строке»: из строки накладной рождается документ вывоза,
+// документом-основанием которого выступает завоз этой строки.
+app.post('/api/invoices/:id/items/:itemId/outbound', authRequired, roleRequired('admin', 'dispatcher', 'shift'), (req, res) => {
+  const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(Number(req.params.id));
+  if (!inv) return res.status(404).json({ err: 'Накладная не найдена' });
+  const item = db.prepare('SELECT * FROM invoice_items WHERE id = ? AND invoice_id = ?')
+    .get(Number(req.params.itemId), inv.id);
+  if (!item) return res.status(404).json({ err: 'Строка не найдена' });
+
+  const basis = item.operation_id
+    ? db.prepare('SELECT * FROM operations WHERE id = ?').get(item.operation_id)
+    : null;
+  const body = req.body || {};
+
+  const info = db.prepare(`
+    INSERT INTO operations
+      (doc_no, kind, op_date, org, counterparty_id, owner_id, recipient_id, warehouse_id, movement,
+       transport_mode, cargo_status, status, container_id, container_category, seal_no, plate, driver, wagon_kind,
+       basis_id, invoice_id, responsible_id, comment)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    docNo('вывоз'),
+    'вывоз',
+    nowStamp(),
+    inv.org || DEFAULT_ORG,
+    basis ? basis.counterparty_id : null,
+    inv.owner_id || (basis ? basis.owner_id : null),
+    inv.recipient_id || (basis ? basis.recipient_id : null),
+    item.warehouse_id || (basis ? basis.warehouse_id : null),
+    'Вывоз гружёный',
+    basis ? basis.transport_mode : 'Автотранспортом',
+    basis ? basis.cargo_status : '',
+    'черновик',
+    item.container_id || null,
+    item.category || '20 футовый',
+    '',
+    String(body.plate || '').trim().toUpperCase(),
+    String(body.driver || ''),
+    basis ? basis.wagon_kind : '',
+    basis ? basis.id : null,
+    inv.id,
+    intOrNull(body.responsible_id) || req.user.id,
+    'Создано из накладной ' + inv.doc_no
+  );
+
+  const op = getOperation(info.lastInsertRowid);
+  logAction(req, 'invoice:outbound', 'Вывоз ' + op.doc_no + ' из накладной ' + inv.doc_no);
+  emitUpdate('operation:update', op);
+  emitUpdate('invoice:update', getInvoice(inv.id));
+  res.status(201).json(op);
 });
 
 // ---------- Обработка ошибок ----------

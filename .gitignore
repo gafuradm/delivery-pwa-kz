@@ -6,6 +6,7 @@ server/db/*.db
 server/db/*.db-journal
 server/db/*.db-wal
 server/db/*.db-shm
+server/db/*.bak-*
 
 # Загрузки
 public/uploads/*
@@ -25,3 +26,8 @@ npm-debug.log*
 *.png
 !public/icon.png
 login-snapshot.yml
+
+# Скриншоты и фотографии-образцы (снимки бумажных форм, фото из мессенджеров)
+*.jpg
+*.jpeg
+IMG-*
