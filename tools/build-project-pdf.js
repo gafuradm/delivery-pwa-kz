@@ -43,8 +43,14 @@ function findChrome() {
   return null;
 }
 
+// \x26 = «&». Сущности записаны через код символа: иначе амперсанд в литералах
+// может быть повторно раскодирован при редактировании и экранирование сломается.
 function esc(s) {
-  return s.replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>').replace(/"/g, '"');
+  return String(s)
+    .replace(/&/g, '\x26amp;')
+    .replace(/</g, '\x26lt;')
+    .replace(/>/g, '\x26gt;')
+    .replace(/"/g, '\x26quot;');
 }
 
 // Инлайн-разметка: `код`, **жирный**, *курсив*, [текст](ссылка), автолинки.
@@ -79,7 +85,14 @@ function inline(text) {
   s = s.replace(new RegExp(`${PH_CODE}(\\d+)${PH_END}`, 'g'), (m, i) => `<code>${esc(codes[Number(i)] || '')}</code>`);
   s = s.replace(new RegExp(`${PH_LINK}(\\d+)${PH_END}`, 'g'), (m, i) => {
     const [label, href] = links[Number(i)] || ['', ''];
-    return `<a href="${esc(href)}">${inline(label)}</a>`;
+    // В подписи ссылки могли остаться плейсхолдеры кода (случай [`файл`](путь)):
+    // возвращаем им вид `код`, иначе рекурсивный inline() не найдёт их в своём
+    // (пустом) массиве codes и подпись превратится в <code></code>.
+    const labelMd = String(label).replace(
+      new RegExp(`${PH_CODE}(\\d+)${PH_END}`, 'g'),
+      (mm, ci) => `\`${codes[Number(ci)] || ''}\``
+    );
+    return `<a href="${esc(href)}">${inline(labelMd)}</a>`;
   });
   return s;
 }
