@@ -168,3 +168,17 @@ curl -s https://damulogistics.onrender.com/sw.js | grep CACHE_NAME
 5. **Обходной путь без GitHub App** (репозиторий публичный): **New + → Web Service → Public Git repository** → URL `https://github.com/gafuradm/delivery-pwa-kz`, ветка `qazconhub`, runtime **Docker**, имя `damulogistics`, план `free`, регион `frankfurt`, health check `/`, переменные `NODE_ENV=production` и `JWT_SECRET` (сгенерировать). Такой сервис не управляется [`render.yaml`](render.yaml:1), и авто-деплой по пушу для него недоступен — обновления запускаются вручную (**Manual Deploy**) или через **Deploy Hook** из CI.
 
 Проверка доступа к ветке: даже при подключённом репозитории Blueprint читает манифест из **выбранной** ветки, поэтому в списке веток нужно указать `qazconhub` — в `master` файла [`render.yaml`](render.yaml:1) нет.
+
+## «A Blueprint file was found, but there was an issue»
+Значит манифест найден и разобран, но ресурс создать нельзя. Самая частая причина — **имя сервиса уже занято в аккаунте**: `name:` из манифеста должно быть уникальным, при этом URL-субдомен может оставаться свободным (проверка: `curl -o /dev/null -w '%{http_code}' https://damulogistics.onrender.com/` → `404` означает, что субдомен свободен).
+
+Варианты решения:
+1. **Освободить имя:** занятый сервис → **Settings → Name/URL** → переименовать, например, в `damulogistics-legacy`, затем **Sync**/**Apply** в Blueprint-проекте. После проверки нового сервиса старый удалить (**Settings → Delete Web Service**).
+2. **Взять другое имя:** изменить `name:` в [`render.yaml`](render.yaml:5), запушить в `qazconhub`, нажать **Sync** в Blueprint-проекте.
+3. **Отказаться от Blueprint** (быстрее и без простоя): оставить существующий сервис, задать ему адрес `damulogistics` в **Settings** и включить **Auto-Deploy: Yes** с веткой `qazconhub` → **Manual Deploy → Deploy latest commit**. Результат тот же (авто-деплой по пушу и новый адрес), но сервис не пересоздаётся. Сам Blueprint-проект с ошибкой удалить: **Settings → Delete Blueprint**.
+
+Проверка, какой адрес реально обслуживается:
+```bash
+curl -s -o /dev/null -w 'qazconhub-terminal: %{http_code}\n' https://qazconhub-terminal.onrender.com/
+curl -s -o /dev/null -w 'damulogistics:      %{http_code}\n' https://damulogistics.onrender.com/
+```
