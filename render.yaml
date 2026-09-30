@@ -3,6 +3,7 @@
 services:
   - type: web
     name: damulogistics
+    branch: qazconhub
     runtime: docker
     plan: free
     region: frankfurt

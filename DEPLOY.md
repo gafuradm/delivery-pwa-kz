@@ -22,8 +22,8 @@
 1. Зарегистрируйтесь на https://render.com (кнопка **Get Started → GitHub**; банковская карта не требуется).
 2. **New +** → **Blueprint**.
 3. Выберите репозиторий `gafuradm/delivery-pwa-kz` (при первом разе дайте Render доступ к GitHub).
-4. В поле **Branch** выберите **`qazconhub`** (не `master`!).
-5. Render прочитает `render.yaml` и покажет сервис **damulogistics**.
+4. В поле **Branch** выберите **`qazconhub`** — не `master`. Это обязательный шаг: Render читает [`render.yaml`](render.yaml:1) **именно из выбранной ветки**, а в `master` этого файла нет — отсюда и сообщение «No resources managed by this Blueprint».
+5. Render прочитает манифест и покажет сервис **damulogistics**: тип `web`, runtime `docker`, план `free`, регион `frankfurt`, health-check `/`, `autoDeploy: true`, ветка деплоя зафиксирована как `branch: qazconhub`.
 6. Нажмите **Apply** / **Create Resources**.
 
 ## Шаг 3. Дождаться сборки
@@ -37,6 +37,15 @@ https://damulogistics.onrender.com
 ## Шаг 4. Проверка
 - Откройте URL → откроется страница входа ([`index.html`](public/index.html:1)).
 - Логин: **admin** / **admin123** (см. seed в [`server/db.js`](server/db.js:305)).
+
+## Шаг 5. Убрать старые ресурсы
+Когда новый сервис **damulogistics** отвечает 200:
+1. Старый сервис **qazconhub-terminal** → **Settings → Delete Web Service**.
+2. Пустой Blueprint-проект, который писал «No resources managed by this Blueprint» → **Settings → Delete Blueprint**.
+
+Это важно на бесплатном тарифе: лимит — 750 инстанс-часов в месяц на аккаунт, два одновременно работающих сервиса расходуют его примерно вдвое быстрее.
+
+Порядок важен: сначала создайте и проверьте новый сервис, и только потом удаляйте старый — так адрес `damulogistics.onrender.com` не окажется занят дважды.
 
 ## Особенности бесплатного тарифа Render
 - **Засыпание:** после 15 минут простоя сервис останавливается; первый запрос — «холодный старт» 30–60 секунд.
