@@ -176,6 +176,16 @@ curl -s https://damulogistics.onrender.com/sw.js | grep CACHE_NAME
 1. **Освободить имя:** занятый сервис → **Settings → Name/URL** → переименовать, например, в `damulogistics-legacy`, затем **Sync**/**Apply** в Blueprint-проекте. После проверки нового сервиса старый удалить (**Settings → Delete Web Service**).
 2. **Взять другое имя:** изменить `name:` в [`render.yaml`](render.yaml:5), запушить в `qazconhub`, нажать **Sync** в Blueprint-проекте.
 3. **Отказаться от Blueprint** (быстрее и без простоя): оставить существующий сервис, задать ему адрес `damulogistics` в **Settings** и включить **Auto-Deploy: Yes** с веткой `qazconhub` → **Manual Deploy → Deploy latest commit**. Результат тот же (авто-деплой по пушу и новый адрес), но сервис не пересоздаётся. Сам Blueprint-проект с ошибкой удалить: **Settings → Delete Blueprint**.
+4. **Проверить лимиты воркспейса:** Dashboard → **Billing** → **Build Pipeline Minutes** и **Spend limit**. На бесплатном тарифе воркспейсу отводится ограниченное число минут сборки в месяц; когда они израсходованы (и не добавлен способ оплаты или достигнут лимит расходов), Render **отключает все новые сборки** до конца месяца — в этом случае Blueprint не сможет создать сервис, хотя манифест корректен.
+5. **Название Blueprint-проекта ни при чём:** конфликт вызывает поле `name:` из манифеста. Смена названия проекта не освобождает имя ресурса — нужно переименовать или удалить сам **сервис**.
+
+Проверить манифест локально, до обращения к панели, можно валидатором по официальной схеме Render:
+```bash
+python3 -m venv /tmp/rv && /tmp/rv/bin/pip install --quiet jsonschema pyyaml
+curl -s https://render.com/schema/render.yaml.json -o /tmp/render-schema.json
+/tmp/rv/bin/python -c "import json,yaml;from jsonschema import Draft202012Validator as V;d=json.load(open('/tmp/render-schema.json'));print('ошибок валидации:',len(list(V(d).iter_errors(yaml.safe_load(open('render.yaml'))))))"
+```
+Ответ `ошибок валидации: 0` означает, что дело не в файле, а в состоянии аккаунта (занятое имя сервиса, лимиты сборки — см. пункты выше).
 
 Проверка, какой адрес реально обслуживается:
 ```bash
