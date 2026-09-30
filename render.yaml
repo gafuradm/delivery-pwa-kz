@@ -2,7 +2,7 @@
 # Документация: https://render.com/docs/blueprint-spec
 services:
   - type: web
-    name: damulogistics
+    name: damu
     branch: qazconhub
     runtime: docker
     plan: free
