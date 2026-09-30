@@ -155,3 +155,15 @@ curl -s https://damulogistics.onrender.com/sw.js | grep CACHE_NAME
 4. **Если нужен именно Blueprint как источник истины** — после Sync Render создаст **новый** сервис `damulogistics`, а старый `qazconhub-terminal` останется отдельным ресурсом: проверьте новый адрес и удалите старый (**Settings → Delete Web Service**). На free-тарифе это важно: лимит — 750 инстанс-часов в месяц на аккаунт, два работающих сервиса расходуют его вдвое быстрее.
 
 Признак того, что сервис управляется Blueprint: в его карточке есть пометка **Managed by Blueprint**, а настройки совпадают с [`render.yaml`](render.yaml:1).
+
+## Репозиторий не виден в списке при создании Blueprint
+Сам репозиторий доступен: `https://github.com/gafuradm/delivery-pwa-kz` — публичный, ветка по умолчанию `master`. Значит дело не в репозитории, а в доступе GitHub App **Render** к аккаунту-владельцу.
+
+Проверьте по порядку:
+1. **Какой GitHub-аккаунт подключён к Render:** Dashboard → **Account Settings → GitHub**. Если подключён другой аккаунт — **Disconnect**, затем **Connect** и авторизуйтесь под владельцем репозитория.
+2. **Доступ GitHub App к репозиторию:** https://github.com/settings/installations → **Render** → **Configure** → **Repository access** → **All repositories** или **Only select repositories** → добавить `delivery-pwa-kz` → **Save**. Если установки Render в аккаунте нет, её создаст шаг 1 — при установке сразу отметьте нужные репозитории.
+3. **Обновить список в Render:** в диалоге создания сервиса нажмите **Configure account** / обновите страницу — список репозиториев подтягивается из GitHub не мгновенно.
+4. **Репозиторий в организации:** https://github.com/organizations/<org>/settings/installations → **Render** → **Configure** → добавить репозиторий. Нужны права владельца организации, а при включённых ограничениях — одобрение в **Organization settings → Third-party Access**.
+5. **Обходной путь без GitHub App** (репозиторий публичный): **New + → Web Service → Public Git repository** → URL `https://github.com/gafuradm/delivery-pwa-kz`, ветка `qazconhub`, runtime **Docker**, имя `damulogistics`, план `free`, регион `frankfurt`, health check `/`, переменные `NODE_ENV=production` и `JWT_SECRET` (сгенерировать). Такой сервис не управляется [`render.yaml`](render.yaml:1), и авто-деплой по пушу для него недоступен — обновления запускаются вручную (**Manual Deploy**) или через **Deploy Hook** из CI.
+
+Проверка доступа к ветке: даже при подключённом репозитории Blueprint читает манифест из **выбранной** ветки, поэтому в списке веток нужно указать `qazconhub` — в `master` файла [`render.yaml`](render.yaml:1) нет.
