@@ -22,9 +22,10 @@
 1. Зарегистрируйтесь на https://render.com (кнопка **Get Started → GitHub**; банковская карта не требуется).
 2. **New +** → **Blueprint**.
 3. Выберите репозиторий `gafuradm/delivery-pwa-kz` (при первом разе дайте Render доступ к GitHub).
-4. В поле **Branch** выберите **`qazconhub`** — не `master`. Это обязательный шаг: Render читает [`render.yaml`](render.yaml:1) **именно из выбранной ветки**, а в `master` этого файла нет — отсюда и сообщение «No resources managed by this Blueprint».
-5. Render прочитает манифест и покажет сервис **damulogistics**: тип `web`, runtime `docker`, план `free`, регион `frankfurt`, health-check `/`, `autoDeploy: true`, ветка деплоя зафиксирована как `branch: qazconhub`.
-6. Нажмите **Apply** / **Create Resources**.
+4. **Blueprint Path** — оставьте `render.yaml`: манифест лежит в корне репозитория (файл спецификации Render должен называться именно `render.yaml`; путь вида `deploy/render.yaml` указывают только тогда, когда манифест лежит в подпапке).
+5. В поле **Branch** выберите **`qazconhub`** — не `master`. Это обязательный шаг: Render читает [`render.yaml`](render.yaml:1) **именно из выбранной ветки**, а в `master` этого файла нет — отсюда и сообщение «No resources managed by this Blueprint».
+6. Render прочитает манифест и покажет сервис **damulogistics**: тип `web`, runtime `docker`, план `free`, регион `frankfurt`, health-check `/`, `autoDeploy: true`, ветка деплоя зафиксирована как `branch: qazconhub`.
+7. Нажмите **Apply** / **Create Resources**.
 
 ## Шаг 3. Дождаться сборки
 Первый билд занимает **3–6 минут** (компиляция `better-sqlite3`). В логах появится строка вида `Server started on 0.0.0.0:<PORT>` / `listening`.
