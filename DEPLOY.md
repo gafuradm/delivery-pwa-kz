@@ -136,3 +136,13 @@ curl -s https://damulogistics.onrender.com/sw.js | grep CACHE_NAME
 - старый адрес `qazconhub-terminal.onrender.com` перестаёт работать — автоматический редирект Render не настраивает;
 - service worker, кэш и `localStorage` (в нём JWT) привязаны к origin: пользователям нужно открыть новый адрес, установить PWA заново и войти; данные в БД при этом сохраняются, если подключён постоянный диск;
 - свой домен можно добавить отдельно: **Settings → Custom Domains → Add Custom Domain** (CNAME на `<имя>.onrender.com`) — тогда оба адреса работают параллельно.
+
+## Если Blueprint пишет «No resources managed by this Blueprint»
+Это означает, что Blueprint-проект не владеет работающим сервисом: либо сервис создан как обычный **Web Service**, либо Blueprint смотрит не на ту ветку. Порядок действий:
+
+1. **Проверить ветку Blueprint:** Blueprint-проект → **Settings → Branch**. Должна быть `qazconhub`: в ветке `master` файла [`render.yaml`](render.yaml:1) нет, поэтому Render не находит ресурсов. Выберите `qazconhub` и нажмите **Sync** → **Apply**.
+2. **Посмотреть события проекта** после Sync: там будет причина (ошибка разбора [`render.yaml`](render.yaml:1), занятое имя сервиса и т. п.).
+3. **Если ресурсы не создаются** — Blueprint не умеет «подхватывать» уже существующие сервисы. Переименуйте работающий сервис вручную (см. раздел выше) и удалите пустой Blueprint-проект: **Settings → Delete Blueprint**.
+4. **Если нужен именно Blueprint как источник истины** — после Sync Render создаст **новый** сервис `damulogistics`, а старый `qazconhub-terminal` останется отдельным ресурсом: проверьте новый адрес и удалите старый (**Settings → Delete Web Service**). На free-тарифе это важно: лимит — 750 инстанс-часов в месяц на аккаунт, два работающих сервиса расходуют его вдвое быстрее.
+
+Признак того, что сервис управляется Blueprint: в его карточке есть пометка **Managed by Blueprint**, а настройки совпадают с [`render.yaml`](render.yaml:1).
