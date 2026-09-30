@@ -23,14 +23,14 @@
 2. **New +** → **Blueprint**.
 3. Выберите репозиторий `gafuradm/delivery-pwa-kz` (при первом разе дайте Render доступ к GitHub).
 4. В поле **Branch** выберите **`qazconhub`** (не `master`!).
-5. Render прочитает `render.yaml` и покажет сервис **qazconhub-terminal**.
+5. Render прочитает `render.yaml` и покажет сервис **damulogistics**.
 6. Нажмите **Apply** / **Create Resources**.
 
 ## Шаг 3. Дождаться сборки
 Первый билд занимает **3–6 минут** (компиляция `better-sqlite3`). В логах появится строка вида `Server started on 0.0.0.0:<PORT>` / `listening`.
 После этого сервис доступен по адресу:
 ```
-https://qazconhub-terminal.onrender.com
+https://damulogistics.onrender.com
 ```
 (точный домен Render покажет в панели сервиса)
 
@@ -77,7 +77,7 @@ BASE_URL=https://<тестовый-стенд> npm run test:direct
 fly secrets set JWT_SECRET="$(openssl rand -hex 32)"
 
 # Docker
-docker run -p 8080:8080 -e JWT_SECRET="$(openssl rand -hex 32)" qazconhub-terminal
+docker run -p 8080:8080 -e JWT_SECRET="$(openssl rand -hex 32)" damulogistics
 
 # Render без Blueprint: Settings → Environment → Add Environment Variable
 ```
@@ -102,15 +102,15 @@ service worker'ом по стратегии cache-first, поэтому у ве�
 `autoDeploy` из [`render.yaml`](render.yaml:11) применяется при создании сервиса из Blueprint.
 Для уже созданного сервиса проверьте настройки и подтвердите деплой вручную:
 
-1. Панель Render → сервис **qazconhub-terminal** → **Settings → Build & Deploy**:
+1. Панель Render → сервис **damulogistics** → **Settings → Build & Deploy**:
    **Auto-Deploy: Yes**, **Branch: `qazconhub`** (не `master` — там старое React/Supabase-приложение).
 2. Затем **Manual Deploy → Deploy latest commit** и дождитесь завершения сборки в **Logs**.
 3. Проверка, что прод подхватил изменения:
 
 ```bash
-curl -s  https://qazconhub-terminal.onrender.com/sw.js | grep CACHE_NAME          # актуальная версия кэша
-curl -sI https://qazconhub-terminal.onrender.com/js/dashboard-docs.js | head -1   # 200, а не 404
-curl -sI https://qazconhub-terminal.onrender.com/js/dashboard.js | grep -i last-modified
+curl -s  https://damulogistics.onrender.com/sw.js | grep CACHE_NAME          # актуальная версия кэша
+curl -sI https://damulogistics.onrender.com/js/dashboard-docs.js | head -1   # 200, а не 404
+curl -sI https://damulogistics.onrender.com/js/dashboard.js | grep -i last-modified
 ```
 
 Признаки устаревшей сборки: `/js/dashboard-docs.js` отдаёт **404**, а `last-modified`
@@ -120,3 +120,19 @@ curl -sI https://qazconhub-terminal.onrender.com/js/dashboard.js | grep -i last-
 - Вход: **admin / admin123** (seed-данные).
 - Быстрый признак новой версии — разделы **«Завоз» / «Вывоз» / «Расходные накладные» / «Справочники»** в панели и доступный файл `/js/dashboard-docs.js`.
 - На бесплатном тарифе первый запрос после простоя — «холодный старт» 30–60 секунд.
+
+## Переименование сервиса и смена адреса
+Адрес `<имя>.onrender.com` определяется именем сервиса. В репозитории уже указано имя `damulogistics`.
+
+1. **Через Blueprint:** имя задаётся в [`render.yaml`](render.yaml:5) — запушьте изменения в ветку `qazconhub` и нажмите **Sync** в Blueprint-проекте Render; Render приведёт сервис к новому имени и адресу.
+2. **Вручную** (если сервис создан без Blueprint): **Settings → Service Name / Edit URL** → задать `damulogistics`. Имя должно быть свободно среди всех сервисов Render.
+3. Дождаться сборки и проверить новый адрес:
+
+```bash
+curl -s https://damulogistics.onrender.com/sw.js | grep CACHE_NAME
+```
+
+Что учесть при смене адреса:
+- старый адрес `qazconhub-terminal.onrender.com` перестаёт работать — автоматический редирект Render не настраивает;
+- service worker, кэш и `localStorage` (в нём JWT) привязаны к origin: пользователям нужно открыть новый адрес, установить PWA заново и войти; данные в БД при этом сохраняются, если подключён постоянный диск;
+- свой домен можно добавить отдельно: **Settings → Custom Domains → Add Custom Domain** (CNAME на `<имя>.onrender.com`) — тогда оба адреса работают параллельно.

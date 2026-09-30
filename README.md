@@ -134,8 +134,8 @@ npm start
 ### Docker
 
 ```bash
-docker build -t qazconhub-terminal .
-docker run -p 8080:8080 -e JWT_SECRET="$(openssl rand -hex 32)" qazconhub-terminal
+docker build -t damulogistics .
+docker run -p 8080:8080 -e JWT_SECRET="$(openssl rand -hex 32)" damulogistics
 ```
 
 В образе выставлен `NODE_ENV=production`, поэтому без `JWT_SECRET` контейнер завершится
@@ -165,7 +165,7 @@ PDF-отчёты, загрузка файлов, разграничение до
 с подсказкой. Остальные варианты:
 
 ```bash
-BASE_URL=https://qazconhub-terminal.onrender.com npm run test:direct  # против внешнего стенда
+BASE_URL=https://damulogistics.onrender.com npm run test:direct  # против внешнего стенда
 ALLOW_DIRTY_DB=1 npm run test:direct                                 # осознанно в рабочую БД
 npm run db:clean-test                                                # dry-run очистки мусора тестов
 npm run db:clean-test -- --apply                                     # удалить мусор (с бэкапом БД)

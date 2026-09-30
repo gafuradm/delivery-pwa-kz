@@ -2,7 +2,7 @@
 # Документация: https://render.com/docs/blueprint-spec
 services:
   - type: web
-    name: qazconhub-terminal
+    name: damulogistics
     runtime: docker
     plan: free
     region: frankfurt

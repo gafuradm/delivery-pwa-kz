@@ -824,8 +824,8 @@ npm start
 [`Dockerfile`](Dockerfile) собирает образ на базе `node:20-alpine`:
 
 ```bash
-docker build -t qazconhub-terminal .
-docker run -p 8080:8080 qazconhub-terminal
+docker build -t damulogistics .
+docker run -p 8080:8080 damulogistics
 ```
 
 Особенности:

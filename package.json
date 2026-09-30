@@ -1,5 +1,5 @@
 {
-  "name": "qazconhub-terminal",
+  "name": "damulogistics",
   "version": "1.0.0",
   "description": "QazconHub — цифровая платформа логистического терминала (контейнеры, ППЖТ, спецтехника, пропускной режим, электронная очередь)",
   "main": "server/server.js",
