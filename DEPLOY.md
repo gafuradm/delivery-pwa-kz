@@ -24,29 +24,35 @@
 3. Выберите репозиторий `gafuradm/delivery-pwa-kz` (при первом разе дайте Render доступ к GitHub).
 4. **Blueprint Path** — оставьте `render.yaml`: манифест лежит в корне репозитория (файл спецификации Render должен называться именно `render.yaml`; путь вида `deploy/render.yaml` указывают только тогда, когда манифест лежит в подпапке).
 5. В поле **Branch** выберите **`qazconhub`** — не `master`. Это обязательный шаг: Render читает [`render.yaml`](render.yaml:1) **именно из выбранной ветки**, а в `master` этого файла нет — отсюда и сообщение «No resources managed by this Blueprint».
-6. Render прочитает манифест и покажет сервис **damulogistics**: тип `web`, runtime `docker`, план `free`, регион `frankfurt`, health-check `/`, `autoDeploy: true`, ветка деплоя зафиксирована как `branch: qazconhub`.
+6. Render прочитает манифест и покажет сервис **damu**: тип `web`, runtime `docker`, план `free`, регион `frankfurt`, health-check `/`, `autoDeploy: true`, ветка деплоя зафиксирована как `branch: qazconhub`.
 7. Нажмите **Apply** / **Create Resources**.
 
 ## Шаг 3. Дождаться сборки
 Первый билд занимает **3–6 минут** (компиляция `better-sqlite3`). В логах появится строка вида `Server started on 0.0.0.0:<PORT>` / `listening`.
-После этого сервис доступен по адресу:
-```
-https://damulogistics.onrender.com
-```
-(точный домен Render покажет в панели сервиса)
+После этого сервис доступен по адресу вида `https://<имя-сервиса>.onrender.com` — точный домен Render покажет в панели сервиса.
+
+Действующий сервис, который уже обслуживает проект: **https://qazconhub-terminal.onrender.com**
+(имя сервиса из [`render.yaml`](render.yaml:5) — `damu`; адрес `damu.onrender.com` заработает только после применения Blueprint/**Sync** или ручного переименования сервиса).
 
 ## Шаг 4. Проверка
 - Откройте URL → откроется страница входа ([`index.html`](public/index.html:1)).
 - Логин: **admin** / **admin123** (см. seed в [`server/db.js`](server/db.js:305)).
 
-## Шаг 5. Убрать старые ресурсы
-Когда новый сервис **damulogistics** отвечает 200:
-1. Старый сервис **qazconhub-terminal** → **Settings → Delete Web Service**.
-2. Пустой Blueprint-проект, который писал «No resources managed by this Blueprint» → **Settings → Delete Blueprint**.
+## Шаг 5. Убрать лишние ресурсы (только если сервисов действительно два)
+
+⚠️ **Проверьте, что удаляете именно дубль.** Сейчас проект обслуживает сервис
+**qazconhub-terminal** (`https://qazconhub-terminal.onrender.com`) — удалять его нельзя:
+именно он собирается из ветки `qazconhub` и уже отдаёт текущую версию (`qazconhub-cache-v8`,
+включая раздел «Прибытие ЖД»).
+
+Если после применения Blueprint появился **второй** сервис (`damu`):
+1. Дождитесь, пока новый сервис отвечает 200 и на нём видна свежая сборка.
+2. Только тогда удалите ставший лишним сервис: **Settings → Delete Web Service**.
+3. Пустой Blueprint-проект, который писал «No resources managed by this Blueprint» → **Settings → Delete Blueprint**.
 
 Это важно на бесплатном тарифе: лимит — 750 инстанс-часов в месяц на аккаунт, два одновременно работающих сервиса расходуют его примерно вдвое быстрее.
 
-Порядок важен: сначала создайте и проверьте новый сервис, и только потом удаляйте старый — так адрес `damulogistics.onrender.com` не окажется занят дважды.
+Порядок важен: сначала проверьте новый сервис, и только потом удаляйте старый.
 
 ## Особенности бесплатного тарифа Render
 - **Засыпание:** после 15 минут простоя сервис останавливается; первый запрос — «холодный старт» 30–60 секунд.
@@ -86,7 +92,7 @@ BASE_URL=https://<тестовый-стенд> npm run test:direct
 # Fly.io — до первого деплоя
 fly secrets set JWT_SECRET="$(openssl rand -hex 32)"
 
-# Docker
+# Docker (имя образа после docker build -t <имя> — произвольное)
 docker run -p 8080:8080 -e JWT_SECRET="$(openssl rand -hex 32)" damulogistics
 
 # Render без Blueprint: Settings → Environment → Add Environment Variable
@@ -97,49 +103,64 @@ docker run -p 8080:8080 -e JWT_SECRET="$(openssl rand -hex 32)" damulogistics
 **Runtime: Docker** → **Instance Type: Free** → **Health Check Path: `/`** → **Create Web Service**.
 
 ## Обновление после изменений кода
-При включённом `autoDeploy: true` Render пересобирает сервис автоматически при каждом `git push` в ветку `qazconhub`.
-Пушить изменения нужно так:
-```
-git push origin master:qazconhub
+
+**Обычный путь (рекомендуемый):** сделать коммит и запушить в рабочую ветку `qazconhub`.
+`autoDeploy: true` в [`render.yaml`](render.yaml:1) заставит Render пересобрать сервис автоматически.
+
+```bash
+git add -A && git commit -m "feat: ..."
+git push origin HEAD:qazconhub      # в этой ветке upstream уже настроен, достаточно git push
 ```
 
+Ветка в локальном репозитории называется `master`, но её upstream — `origin/qazconhub`
+(ветка `master` на GitHub содержит другое, старое React/Supabase-приложение — туда пушить нельзя).
+
 Если менялись `public/css/style.css` или `public/js/*.js`, поднимите версию кэша в
-[`public/sw.js`](public/sw.js:1) (текущая — `qazconhub-cache-v7`). Статика отдаётся
+[`public/sw.js`](public/sw.js:1) (текущая — `qazconhub-cache-v8`). Статика отдаётся
 service worker'ом по стратегии cache-first, поэтому у вернувшихся пользователей иначе
 останется старая версия файлов до фонового обновления кэша.
 
+**Если автодеплой выключен или нужно обновить прямо сейчас:** панель Render → сервис →
+**Manual Deploy → Deploy latest commit → Deploy** (или **Clear build cache & deploy**, если
+сборка кэширует старые слои).
+
 ## Если автодеплой не сработал
-`autoDeploy` из [`render.yaml`](render.yaml:11) применяется при создании сервиса из Blueprint.
+`autoDeploy` из [`render.yaml`](render.yaml:12) применяется при создании сервиса из Blueprint.
 Для уже созданного сервиса проверьте настройки и подтвердите деплой вручную:
 
-1. Панель Render → сервис **damulogistics** → **Settings → Build & Deploy**:
+1. Панель Render → сервис (сейчас **qazconhub-terminal**) → **Settings → Build & Deploy**:
    **Auto-Deploy: Yes**, **Branch: `qazconhub`** (не `master` — там старое React/Supabase-приложение).
 2. Затем **Manual Deploy → Deploy latest commit** и дождитесь завершения сборки в **Logs**.
-3. Проверка, что прод подхватил изменения:
+3. Проверка, что прод подхватил изменения (подставьте адрес своего сервиса):
 
 ```bash
-curl -s  https://damulogistics.onrender.com/sw.js | grep CACHE_NAME          # актуальная версия кэша
-curl -sI https://damulogistics.onrender.com/js/dashboard-docs.js | head -1   # 200, а не 404
-curl -sI https://damulogistics.onrender.com/js/dashboard.js | grep -i last-modified
+SITE=https://qazconhub-terminal.onrender.com
+curl -s  $SITE/sw.js | grep CACHE_NAME              # ожидается qazconhub-cache-v8
+curl -sI $SITE/js/dashboard-docs.js | head -1       # 200, а не 404
+curl -sI $SITE/js/dashboard-rail.js | head -1       # 200 — раздел «Прибытие ЖД» в сборке
+curl -s -o /dev/null -w '%{http_code}\n' $SITE/api/rail-arrivals   # 401 — новый API-роут жив (без токена так и должно быть)
+curl -sI $SITE/js/dashboard.js | grep -i last-modified
 ```
 
-Признаки устаревшей сборки: `/js/dashboard-docs.js` отдаёт **404**, а `last-modified`
-у `dashboard.js` старше даты последнего пуша.
+Признаки устаревшей сборки: `/js/dashboard-rail.js` отдаёт **404**, `/api/rail-arrivals` —
+**404** вместо `401`, а `last-modified` у `dashboard.js` старше даты последнего пуша.
+Первый запрос после простоя — «холодный старт» 30–60 секунд: дайте сервису проснуться.
 
 ## Проверка прод-функционала после деплоя
 - Вход: **admin / admin123** (seed-данные).
-- Быстрый признак новой версии — разделы **«Завоз» / «Вывоз» / «Расходные накладные» / «Справочники»** в панели и доступный файл `/js/dashboard-docs.js`.
-- На бесплатном тарифе первый запрос после простоя — «холодный старт» 30–60 секунд.
+- Быстрый признак новой версии — разделы **«Завоз» / «Вывоз» / «Расходные накладные» / «Справочники» / «Прибытие ЖД»** в панели и доступный файл `/js/dashboard-rail.js`.
+- В разделе **«Прибытие ЖД»** проверьте: плитки сводки за текущий месяц, внесение записи (номер вагона/контейнера, пломбы «по документу» и «факт»), подсветку расхождения пломб и выгрузку PDF за месяц.
+- На бесплатном тарифе первый запрос после простоя — «холодный старт» 30–60 секунд, а БД при каждом перезапуске пересоздаётся (таблица `rail_arrivals` создаётся автоматически при старте).
 
 ## Переименование сервиса и смена адреса
-Адрес `<имя>.onrender.com` определяется именем сервиса. В репозитории уже указано имя `damulogistics`.
+Адрес `<имя>.onrender.com` определяется именем сервиса. В репозитории во [`render.yaml`](render.yaml:5) указано имя **`damu`**, но фактически работающий сервис называется **`qazconhub-terminal`** (адрес `https://qazconhub-terminal.onrender.com`) — он создавался вручную, поэтому имя из манифеста к нему не применилось.
 
 1. **Через Blueprint:** имя задаётся в [`render.yaml`](render.yaml:5) — запушьте изменения в ветку `qazconhub` и нажмите **Sync** в Blueprint-проекте Render; Render приведёт сервис к новому имени и адресу.
-2. **Вручную** (если сервис создан без Blueprint): **Settings → Service Name / Edit URL** → задать `damulogistics`. Имя должно быть свободно среди всех сервисов Render.
+2. **Вручную** (если сервис создан без Blueprint): **Settings → Service Name / Edit URL** → задать `damu`. Имя должно быть свободно среди всех сервисов Render.
 3. Дождаться сборки и проверить новый адрес:
 
 ```bash
-curl -s https://damulogistics.onrender.com/sw.js | grep CACHE_NAME
+curl -s https://damu.onrender.com/sw.js | grep CACHE_NAME
 ```
 
 Что учесть при смене адреса:
@@ -153,7 +174,7 @@ curl -s https://damulogistics.onrender.com/sw.js | grep CACHE_NAME
 1. **Проверить ветку Blueprint:** Blueprint-проект → **Settings → Branch**. Должна быть `qazconhub`: в ветке `master` файла [`render.yaml`](render.yaml:1) нет, поэтому Render не находит ресурсов. Выберите `qazconhub` и нажмите **Sync** → **Apply**.
 2. **Посмотреть события проекта** после Sync: там будет причина (ошибка разбора [`render.yaml`](render.yaml:1), занятое имя сервиса и т. п.).
 3. **Если ресурсы не создаются** — Blueprint не умеет «подхватывать» уже существующие сервисы. Переименуйте работающий сервис вручную (см. раздел выше) и удалите пустой Blueprint-проект: **Settings → Delete Blueprint**.
-4. **Если нужен именно Blueprint как источник истины** — после Sync Render создаст **новый** сервис `damulogistics`, а старый `qazconhub-terminal` останется отдельным ресурсом: проверьте новый адрес и удалите старый (**Settings → Delete Web Service**). На free-тарифе это важно: лимит — 750 инстанс-часов в месяц на аккаунт, два работающих сервиса расходуют его вдвое быстрее.
+4. **Если нужен именно Blueprint как источник истины** — после Sync Render создаст **новый** сервис `damu`, а работающий `qazconhub-terminal` останется отдельным ресурсом: сначала убедитесь, что новый сервис отвечает и отдаёт свежую сборку, и только потом удалите лишний (**Settings → Delete Web Service**). Пока новый сервис не проверен, `qazconhub-terminal` удалять нельзя — он обслуживает прод. На free-тарифе лимит — 750 инстанс-часов в месяц на аккаунт, два работающих сервиса расходуют его вдвое быстрее.
 
 Признак того, что сервис управляется Blueprint: в его карточке есть пометка **Managed by Blueprint**, а настройки совпадают с [`render.yaml`](render.yaml:1).
 
@@ -165,17 +186,17 @@ curl -s https://damulogistics.onrender.com/sw.js | grep CACHE_NAME
 2. **Доступ GitHub App к репозиторию:** https://github.com/settings/installations → **Render** → **Configure** → **Repository access** → **All repositories** или **Only select repositories** → добавить `delivery-pwa-kz` → **Save**. Если установки Render в аккаунте нет, её создаст шаг 1 — при установке сразу отметьте нужные репозитории.
 3. **Обновить список в Render:** в диалоге создания сервиса нажмите **Configure account** / обновите страницу — список репозиториев подтягивается из GitHub не мгновенно.
 4. **Репозиторий в организации:** https://github.com/organizations/<org>/settings/installations → **Render** → **Configure** → добавить репозиторий. Нужны права владельца организации, а при включённых ограничениях — одобрение в **Organization settings → Third-party Access**.
-5. **Обходной путь без GitHub App** (репозиторий публичный): **New + → Web Service → Public Git repository** → URL `https://github.com/gafuradm/delivery-pwa-kz`, ветка `qazconhub`, runtime **Docker**, имя `damulogistics`, план `free`, регион `frankfurt`, health check `/`, переменные `NODE_ENV=production` и `JWT_SECRET` (сгенерировать). Такой сервис не управляется [`render.yaml`](render.yaml:1), и авто-деплой по пушу для него недоступен — обновления запускаются вручную (**Manual Deploy**) или через **Deploy Hook** из CI.
+5. **Обходной путь без GitHub App** (репозиторий публичный): **New + → Web Service → Public Git repository** → URL `https://github.com/gafuradm/delivery-pwa-kz`, ветка `qazconhub`, runtime **Docker**, имя `damu`, план `free`, регион `frankfurt`, health check `/`, переменные `NODE_ENV=production` и `JWT_SECRET` (сгенерировать). Такой сервис не управляется [`render.yaml`](render.yaml:1), и авто-деплой по пушу для него недоступен — обновления запускаются вручную (**Manual Deploy**) или через **Deploy Hook** из CI.
 
 Проверка доступа к ветке: даже при подключённом репозитории Blueprint читает манифест из **выбранной** ветки, поэтому в списке веток нужно указать `qazconhub` — в `master` файла [`render.yaml`](render.yaml:1) нет.
 
 ## «A Blueprint file was found, but there was an issue»
-Значит манифест найден и разобран, но ресурс создать нельзя. Самая частая причина — **имя сервиса уже занято в аккаунте**: `name:` из манифеста должно быть уникальным, при этом URL-субдомен может оставаться свободным (проверка: `curl -o /dev/null -w '%{http_code}' https://damulogistics.onrender.com/` → `404` означает, что субдомен свободен).
+Значит манифест найден и разобран, но ресурс создать нельзя. Самая частая причина — **имя сервиса уже занято в аккаунте**: `name:` из манифеста должно быть уникальным, при этом URL-субдомен может оставаться свободным (проверка: `curl -o /dev/null -w '%{http_code}' https://damu.onrender.com/` → `404` означает, что субдомен свободен).
 
 Варианты решения:
-1. **Освободить имя:** занятый сервис → **Settings → Name/URL** → переименовать, например, в `damulogistics-legacy`, затем **Sync**/**Apply** в Blueprint-проекте. После проверки нового сервиса старый удалить (**Settings → Delete Web Service**).
+1. **Освободить имя:** занятый сервис → **Settings → Name/URL** → переименовать, например, в `damu-legacy`, затем **Sync**/**Apply** в Blueprint-проекте. После проверки нового сервиса старый удалить (**Settings → Delete Web Service**).
 2. **Взять другое имя:** изменить `name:` в [`render.yaml`](render.yaml:5), запушить в `qazconhub`, нажать **Sync** в Blueprint-проекте.
-3. **Отказаться от Blueprint** (быстрее и без простоя): оставить существующий сервис, задать ему адрес `damulogistics` в **Settings** и включить **Auto-Deploy: Yes** с веткой `qazconhub` → **Manual Deploy → Deploy latest commit**. Результат тот же (авто-деплой по пушу и новый адрес), но сервис не пересоздаётся. Сам Blueprint-проект с ошибкой удалить: **Settings → Delete Blueprint**.
+3. **Отказаться от Blueprint** (быстрее и без простоя): оставить работающий сервис `qazconhub-terminal` (при желании задать ему в **Settings** имя `damu`) и включить **Auto-Deploy: Yes** с веткой `qazconhub` → **Manual Deploy → Deploy latest commit**. Результат тот же (авто-деплой по пушу), но сервис не пересоздаётся. Сам Blueprint-проект с ошибкой удалить: **Settings → Delete Blueprint**.
 4. **Проверить лимиты воркспейса:** Dashboard → **Billing** → **Build Pipeline Minutes** и **Spend limit**. На бесплатном тарифе воркспейсу отводится ограниченное число минут сборки в месяц; когда они израсходованы (и не добавлен способ оплаты или достигнут лимит расходов), Render **отключает все новые сборки** до конца месяца — в этом случае Blueprint не сможет создать сервис, хотя манифест корректен.
 5. **Название Blueprint-проекта ни при чём:** конфликт вызывает поле `name:` из манифеста. Смена названия проекта не освобождает имя ресурса — нужно переименовать или удалить сам **сервис**.
 
@@ -187,8 +208,9 @@ curl -s https://render.com/schema/render.yaml.json -o /tmp/render-schema.json
 ```
 Ответ `ошибок валидации: 0` означает, что дело не в файле, а в состоянии аккаунта (занятое имя сервиса, лимиты сборки — см. пункты выше).
 
-Проверка, какой адрес реально обслуживается:
+Проверка, какой адрес реально обслуживается (на момент последней проверки: `qazconhub-terminal` — 200,
+`damu` — не отвечает, `damulogistics` — 404/свободен):
 ```bash
 curl -s -o /dev/null -w 'qazconhub-terminal: %{http_code}\n' https://qazconhub-terminal.onrender.com/
-curl -s -o /dev/null -w 'damulogistics:      %{http_code}\n' https://damulogistics.onrender.com/
+curl -s -o /dev/null -w 'damu:               %{http_code}\n' https://damu.onrender.com/
 ```
