@@ -138,10 +138,21 @@ const COUNTERPARTY_KINDS = ['организация', 'контрагент', '�
 const PASS_TYPES = ['разовый', 'постоянный'];
 // «Статус» груза в карточке документа — как в образце: Порожний / Груженный.
 const CARGO_STATUSES = ['Порожний', 'Груженный', 'Груженный (реф)'];
+// Реестр прибытия ЖД транспортом: «Вид к-ра» — типоразмер контейнера либо порожний,
+// статус отражает этап обработки прибывшей подачи.
+const RAIL_KINDS = ['20', '40', '45', 'Порожний'];
+const RAIL_STATUSES = ['ожидается', 'прибыл', 'оформлен'];
+// Типоразмер и вид груза контейнера, создаваемого автоматически из записи прибытия.
+const RAIL_KIND_TO_CONTAINER = {
+  '20': { size: '20', type: 'Гружёный' },
+  '40': { size: '40', type: 'Гружёный' },
+  '45': { size: '45', type: 'Гружёный' },
+  'Порожний': { size: '20', type: 'Порожний' }
+};
 
 // Разрядность номеров как в образцах: Завоз 06859, Вывоз 000014639,
 // Расходная накладная 000004853, Пропуск 000020129
-const DOC_NUMBER_WIDTH = { 'завоз': 5, 'вывоз': 9, 'накладная': 9, 'пропуск': 9 };
+const DOC_NUMBER_WIDTH = { 'завоз': 5, 'вывоз': 9, 'накладная': 9, 'пропуск': 9, 'прибытие жд': 5 };
 
 const nextDocNoTx = db.transaction((scope) => {
   const width = DOC_NUMBER_WIDTH[scope] || 9;
@@ -234,9 +245,17 @@ app.get('/api/stats', authRequired, (_, res) => {
   const operationsOut = db.prepare("SELECT COUNT(*) c FROM operations WHERE kind='вывоз' AND date(op_date)=date('now')").get().c;
   const invoicesToday = db.prepare("SELECT COUNT(*) c FROM invoices WHERE date(doc_date)=date('now')").get().c;
   const passesToday = db.prepare("SELECT COUNT(*) c FROM passes WHERE date(created_at)=date('now')").get().c;
+  // Прибытие ЖД: поданные за сутки, за текущий месяц года и требующие сверки пломбы
+  const railToday = db.prepare("SELECT COUNT(*) c FROM rail_arrivals WHERE date(created_at)=date('now')").get().c;
+  const railMonth = db.prepare(
+    "SELECT COUNT(*) c FROM rail_arrivals WHERE arrival_year = CAST(strftime('%Y','now') AS INTEGER) AND arrival_month = CAST(strftime('%m','now') AS INTEGER)"
+  ).get().c;
+  const railSealMismatch = db.prepare('SELECT seal_doc, seal_fact FROM rail_arrivals').all()
+    .filter(sealMismatch).length;
   res.json({
     containers, containersFull, wagons, wagonsOnTrack, equipment, eqFree, vehicles, queue, requestsNew,
-    operationsOpen, operationsIn, operationsOut, invoicesToday, passesToday
+    operationsOpen, operationsIn, operationsOut, invoicesToday, passesToday,
+    railToday, railMonth, railSealMismatch
   });
 });
 
@@ -565,6 +584,341 @@ app.get('/api/report/wagons', authRequired, roleRequired('admin', 'director', 'f
   doc.end();
 });
 
+app.get('/api/report/rail-arrivals', authRequired, roleRequired('admin', 'director', 'finance', 'shift', 'receiver', 'ppjt'), (req, res) => {
+  const where = [];
+  const params = [];
+  const year = Number(req.query.year);
+  const month = Number(req.query.month);
+  if (Number.isFinite(year) && year > 2000) { where.push('r.arrival_year = ?'); params.push(year); }
+  if (Number.isFinite(month) && month >= 1 && month <= 12) { where.push('r.arrival_month = ?'); params.push(month); }
+  const rows = db.prepare(
+    RAIL_SELECT + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY r.id DESC LIMIT 500'
+  ).all(...params);
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'inline; filename="rail-arrivals-report.pdf"');
+  const doc = new PDFDocument({ size: 'A4', margin: 36, layout: 'landscape' });
+  doc.pipe(res);
+  doc.fontSize(18).fillColor('#1565C0').text('QazconHub — Прибытие ЖД транспортом', { align: 'center' });
+  doc.moveDown(0.4);
+  doc.fontSize(10).fillColor('#666').text(
+    (year ? 'Период: ' + (month ? String(month).padStart(2, '0') + '.' : '') + year : 'Все периоды') +
+    ' · сформировано: ' + new Date().toLocaleString('ru-RU'),
+    { align: 'center' }
+  );
+  doc.moveDown(1.2);
+
+  const header = '№ | Прибытие | Код | Вагон | Контейнер | Вид | Вес | Пломба док. | Пломба факт | Собственник | Грузополучатель | ГПС';
+  doc.fontSize(8).fillColor('#000').text(header);
+  doc.moveTo(doc.x, doc.y + 2).lineTo(doc.page.width - 36, doc.y + 2).strokeColor('#ccc').stroke();
+  doc.moveDown(0.4);
+
+  rows.forEach((r) => {
+    const period = String(r.arrival_month || '').padStart(2, '0') + '.' + (r.arrival_year || '') +
+      (r.arrival_time ? ' ' + r.arrival_time : '');
+    const seal = sealMismatch(r) ? ' ≠' : '';
+    doc.fontSize(8).fillColor(seal ? '#C62828' : '#000').text(
+      [r.doc_no, period, r.code || '—', r.wagon_number || '—', r.container_number || '—',
+       r.container_kind || '—', (r.container_weight || 0) + ' т', r.seal_doc || '—',
+       (r.seal_fact || '—') + seal, r.owner_name || '—', r.recipient_name || '—',
+       r.has_gps ? (r.gps_mark || 'с меткой') : 'без метки'].join(' | ')
+    );
+    doc.moveDown(0.25);
+  });
+
+  const weight = rows.reduce((sum, r) => sum + (Number(r.container_weight) || 0), 0);
+  const mismatch = rows.filter(sealMismatch).length;
+  doc.moveDown(1);
+  doc.fontSize(11).fillColor('#1565C0').text(
+    `Всего записей: ${rows.length} · вес: ${weight.toFixed(2)} т · расхождений пломб: ${mismatch}`,
+    { align: 'right' }
+  );
+  doc.end();
+});
+
+// ============================================================
+// ПРИБЫТИЕ ЖД ТРАНСПОРТОМ (rail_arrivals)
+// ============================================================
+// Реестр подачи контейнеров железной дорогой. Пломба по документу и фактическая
+// пломба хранятся раздельно и сверяются при осмотре: расхождение — сигнал
+// приёмосдатчику. Нормализация (trim + верхний регистр) вынесена в одну функцию,
+// иначе список, статистика и отчёт считали бы расхождения по-разному.
+function normSeal(v) {
+  return String(v == null ? '' : v).trim().toUpperCase();
+}
+
+// Пломба заполнена в документе, но фактическая либо не совпадает, либо не указана.
+function sealMismatch(row) {
+  const doc = normSeal(row && row.seal_doc);
+  if (!doc) return false;
+  return doc !== normSeal(row && row.seal_fact);
+}
+
+const RAIL_SELECT = `
+  SELECT r.*,
+         ow.name AS owner_name,
+         rc.name AS recipient_name,
+         u.name AS responsible_name,
+         c.size AS container_ref_size,
+         c.type AS container_ref_type,
+         w.status AS wagon_ref_status
+  FROM rail_arrivals r
+  LEFT JOIN counterparties ow ON ow.id = r.owner_id
+  LEFT JOIN counterparties rc ON rc.id = r.recipient_id
+  LEFT JOIN users u ON u.id = r.responsible_id
+  LEFT JOIN containers c ON c.id = r.container_id
+  LEFT JOIN wagons w ON w.id = r.wagon_id
+`;
+
+function withRailComputed(row) {
+  if (row) row.seal_mismatch = sealMismatch(row) ? 1 : 0;
+  return row;
+}
+
+function getRailArrival(id) {
+  return withRailComputed(db.prepare(RAIL_SELECT + ' WHERE r.id = ?').get(Number(id)));
+}
+
+// Интеграция со справочниками: контейнер и вагон прибытия либо находятся в системе,
+// либо создаются — так запись из реестра сразу видна в разделах «Контейнеры»
+// и «Пути и вагоны», а не остаётся изолированной строкой.
+function ensureContainer(number, kind, weight, clientName) {
+  const num = String(number || '').trim().toUpperCase();
+  if (!num) return null;
+  const found = db.prepare('SELECT id FROM containers WHERE number = ?').get(num);
+  if (found) return found.id;
+  const shape = RAIL_KIND_TO_CONTAINER[kind] || RAIL_KIND_TO_CONTAINER['20'];
+  const info = db.prepare(
+    'INSERT INTO containers (number, size, type, status, client, weight) VALUES (?,?,?,?,?,?)'
+  ).run(num, shape.size, shape.type, 'на_терминале', String(clientName || ''), Number(weight) || 0);
+  emitUpdate('container:update', { number: num });
+  return info.lastInsertRowid;
+}
+
+function ensureWagon(number, ownerName) {
+  const num = String(number || '').trim().toUpperCase();
+  if (!num) return null;
+  const found = db.prepare('SELECT id FROM wagons WHERE number = ?').get(num);
+  if (found) return found.id;
+  const info = db.prepare('INSERT INTO wagons (number, owner, status, operation) VALUES (?,?,?,?)')
+    .run(num, String(ownerName || ''), 'выгрузка', 'прибытие');
+  emitUpdate('wagon:update', { number: num });
+  return info.lastInsertRowid;
+}
+
+const RAIL_FIELDS = [
+  'arrival_year', 'arrival_month', 'arrival_time', 'code',
+  'wagon_number', 'wagon_id', 'container_number', 'container_id', 'container_kind',
+  'container_weight', 'seal_doc', 'seal_fact', 'owner_id', 'recipient_id',
+  'gps_mark', 'has_gps', 'status', 'comment', 'responsible_id'
+];
+
+const RAIL_TEXT_UPPER = ['code', 'wagon_number', 'container_number', 'seal_doc', 'seal_fact', 'gps_mark'];
+const RAIL_REF_FIELDS = ['wagon_id', 'container_id', 'owner_id', 'recipient_id', 'responsible_id'];
+
+function normalizeRailFields(raw, current) {
+  const out = {};
+  for (const key of Object.keys(raw)) {
+    const value = raw[key];
+    if (RAIL_REF_FIELDS.indexOf(key) >= 0) {
+      out[key] = intOrNull(value);
+    } else if (key === 'arrival_year') {
+      const y = Number(value);
+      out[key] = Number.isFinite(y) && y >= 2000 && y <= 2100 ? Math.trunc(y) : (current ? current.arrival_year : null);
+    } else if (key === 'arrival_month') {
+      const m = Number(value);
+      out[key] = Number.isFinite(m) && m >= 1 && m <= 12 ? Math.trunc(m) : (current ? current.arrival_month : null);
+    } else if (key === 'arrival_time') {
+      out[key] = /^\d{2}:\d{2}$/.test(String(value || '').trim()) ? String(value).trim() : '';
+    } else if (key === 'container_kind') {
+      out[key] = oneOf(value, RAIL_KINDS, current ? current.container_kind : '20');
+    } else if (key === 'status') {
+      out[key] = oneOf(value, RAIL_STATUSES, current ? current.status : 'ожидается');
+    } else if (key === 'container_weight') {
+      const w = Number(value);
+      out[key] = Number.isFinite(w) && w >= 0 ? w : 0;
+    } else if (key === 'has_gps') {
+      out[key] = value ? 1 : 0;
+    } else if (RAIL_TEXT_UPPER.indexOf(key) >= 0) {
+      out[key] = String(value == null ? '' : value).trim().toUpperCase();
+    } else {
+      out[key] = value == null ? '' : String(value);
+    }
+  }
+  return out;
+}
+
+// Период прибытия по умолчанию — текущий месяц года: реестр ведётся помесячно.
+function railPeriod(fields, current) {
+  const now = new Date();
+  const year = (fields && fields.arrival_year) || (current && current.arrival_year) || now.getFullYear();
+  const month = (fields && fields.arrival_month) || (current && current.arrival_month) || (now.getMonth() + 1);
+  const time = fields && fields.arrival_time !== undefined
+    ? fields.arrival_time
+    : (current && current.arrival_time) || now.toTimeString().slice(0, 5);
+  return { year, month, time: time || '', at: `${year}-${String(month).padStart(2, '0')}-01 ${time || '00:00'}:00` };
+}
+
+app.get('/api/rail-arrivals', authRequired, (req, res) => {
+  const year = Number(req.query.year);
+  const month = Number(req.query.month);
+  const kind = String(req.query.kind || '');
+  const status = String(req.query.status || '');
+  const q = String(req.query.q || '').trim().toLowerCase();
+  const onlyMismatch = String(req.query.mismatch || '') === '1';
+
+  let sql = RAIL_SELECT + ' WHERE 1 = 1';
+  const params = [];
+  if (Number.isFinite(year) && year > 2000) { sql += ' AND r.arrival_year = ?'; params.push(year); }
+  if (Number.isFinite(month) && month >= 1 && month <= 12) { sql += ' AND r.arrival_month = ?'; params.push(month); }
+  if (RAIL_KINDS.indexOf(kind) >= 0) { sql += ' AND r.container_kind = ?'; params.push(kind); }
+  if (RAIL_STATUSES.indexOf(status) >= 0) { sql += ' AND r.status = ?'; params.push(status); }
+  if (q) {
+    sql += ' AND (LOWER(r.doc_no) LIKE ? OR LOWER(r.container_number) LIKE ?' +
+      " OR LOWER(r.wagon_number) LIKE ? OR LOWER(r.code) LIKE ? OR LOWER(r.seal_doc) LIKE ?" +
+      ' OR LOWER(r.seal_fact) LIKE ? OR LOWER(r.gps_mark) LIKE ?)';
+    const like = '%' + q + '%';
+    params.push(like, like, like, like, like, like, like);
+  }
+  sql += ' ORDER BY r.id DESC LIMIT 500';
+
+  let rows = db.prepare(sql).all(...params).map(withRailComputed);
+  if (onlyMismatch) rows = rows.filter((r) => r.seal_mismatch);
+
+  const weight = rows.reduce((sum, r) => sum + (Number(r.container_weight) || 0), 0);
+  res.json({
+    items: rows,
+    summary: {
+      total: rows.length,
+      weight,
+      mismatch: rows.filter((r) => r.seal_mismatch).length,
+      withGps: rows.filter((r) => r.has_gps).length,
+      byKind: RAIL_KINDS.reduce((acc, k) => {
+        acc[k] = rows.filter((r) => r.container_kind === k).length;
+        return acc;
+      }, {})
+    }
+  });
+});
+
+app.get('/api/rail-arrivals/:id', authRequired, (req, res) => {
+  const row = getRailArrival(req.params.id);
+  if (!row) return res.status(404).json({ err: 'Запись прибытия не найдена' });
+  res.json(row);
+});
+
+app.post('/api/rail-arrivals', authRequired, roleRequired('admin', 'dispatcher', 'receiver', 'ppjt', 'shift', 'guard'), (req, res) => {
+  const body = req.body || {};
+  const fields = normalizeRailFields(pick(body, RAIL_FIELDS), null);
+
+  if (!fields.container_number) {
+    return res.status(400).json({ err: 'Укажите номер контейнера' });
+  }
+  if (fields.has_gps && !fields.gps_mark) {
+    return res.status(400).json({ err: 'Укажите номер метки ГПС или снимите признак «с меткой»' });
+  }
+  if (fields.seal_doc && fields.seal_fact && normSeal(fields.seal_doc) !== normSeal(fields.seal_fact)) {
+    // Расхождение допустимо (его и фиксирует реестр), но пользователь должен понимать,
+    // что запись попадёт в отчёт как требующая сверки — предупреждаем явно.
+    res.setHeader('X-Seal-Mismatch', '1');
+  }
+
+  const period = railPeriod(fields, null);
+  const ownerName = fields.owner_id
+    ? (db.prepare('SELECT name FROM counterparties WHERE id = ?').get(fields.owner_id) || {}).name
+    : '';
+  const containerId = fields.container_id || ensureContainer(fields.container_number, fields.container_kind, fields.container_weight, ownerName);
+  const wagonId = fields.wagon_id || ensureWagon(fields.wagon_number, ownerName);
+
+  const info = db.prepare(`
+    INSERT INTO rail_arrivals
+      (doc_no, arrival_year, arrival_month, arrival_time, arrival_at, code, wagon_number, wagon_id,
+       container_number, container_id, container_kind, container_weight, seal_doc, seal_fact,
+       owner_id, recipient_id, gps_mark, has_gps, status, comment, responsible_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    docNo('прибытие жд'),
+    period.year,
+    period.month,
+    period.time,
+    period.at,
+    String(fields.code || ''),
+    String(fields.wagon_number || ''),
+    wagonId || null,
+    String(fields.container_number),
+    containerId || null,
+    fields.container_kind || '20',
+    Number(fields.container_weight) || 0,
+    String(fields.seal_doc || ''),
+    String(fields.seal_fact || ''),
+    fields.owner_id || null,
+    fields.recipient_id || null,
+    String(fields.gps_mark || ''),
+    fields.has_gps ? 1 : 0,
+    fields.status || 'ожидается',
+    String(fields.comment || ''),
+    fields.responsible_id || req.user.id
+  );
+
+  const row = getRailArrival(info.lastInsertRowid);
+  logAction(req, 'rail:create', 'Прибытие ' + row.doc_no + ' · ' + row.container_number +
+    (row.seal_mismatch ? ' · расхождение пломбы' : ''));
+  emitUpdate('rail:update', row);
+  res.status(201).json(row);
+});
+
+app.patch('/api/rail-arrivals/:id', authRequired, roleRequired('admin', 'dispatcher', 'receiver', 'ppjt', 'shift'), (req, res) => {
+  const current = db.prepare('SELECT * FROM rail_arrivals WHERE id = ?').get(Number(req.params.id));
+  if (!current) return res.status(404).json({ err: 'Запись прибытия не найдена' });
+
+  const normalized = normalizeRailFields(pick(req.body || {}, RAIL_FIELDS), current);
+  const keys = Object.keys(normalized);
+  if (!keys.length) return res.status(400).json({ err: 'Нет полей для изменения' });
+
+  const merged = Object.assign({}, current, normalized);
+  if (merged.has_gps && !String(merged.gps_mark || '').trim()) {
+    return res.status(400).json({ err: 'Укажите номер метки ГПС или снимите признак «с меткой»' });
+  }
+
+  const period = railPeriod(normalized, current);
+  normalized.arrival_year = period.year;
+  normalized.arrival_month = period.month;
+  normalized.arrival_time = period.time;
+  normalized.arrival_at = period.at;
+
+  // Номера контейнера/вагона могли измениться — синхронизируем справочники.
+  const ownerName = merged.owner_id
+    ? (db.prepare('SELECT name FROM counterparties WHERE id = ?').get(merged.owner_id) || {}).name
+    : '';
+  if (!merged.container_id && merged.container_number) {
+    normalized.container_id = ensureContainer(merged.container_number, merged.container_kind, merged.container_weight, ownerName) || null;
+  }
+  if (!merged.wagon_id && merged.wagon_number) {
+    normalized.wagon_id = ensureWagon(merged.wagon_number, ownerName) || null;
+  }
+
+  const setKeys = Object.keys(normalized);
+  const setClause = setKeys.map((k) => k + ' = ?').join(', ');
+  db.prepare(`UPDATE rail_arrivals SET ${setClause}, updated_at = datetime('now') WHERE id = ?`)
+    .run(...setKeys.map((k) => normalized[k]), current.id);
+
+  const row = getRailArrival(current.id);
+  logAction(req, 'rail:update', 'Прибытие ' + row.doc_no + ' → ' + row.status + (row.seal_mismatch ? ' · расхождение пломбы' : ''));
+  emitUpdate('rail:update', row);
+  res.json(row);
+});
+
+// Удаление доступно администратору и диспетчеру: реестр ведётся помесячно,
+// ошибочные строки (например, задвоенная подача) нужно убирать без следов в отчётах.
+app.delete('/api/rail-arrivals/:id', authRequired, roleRequired('admin', 'dispatcher'), (req, res) => {
+  const row = db.prepare('SELECT * FROM rail_arrivals WHERE id = ?').get(Number(req.params.id));
+  if (!row) return res.status(404).json({ err: 'Запись прибытия не найдена' });
+  db.prepare('DELETE FROM rail_arrivals WHERE id = ?').run(row.id);
+  logAction(req, 'rail:delete', 'Удалено прибытие ' + row.doc_no);
+  emitUpdate('rail:update', { id: row.id, deleted: true });
+  res.json({ ok: true, id: row.id });
+});
+
 // ---------- UPLOAD ----------
 app.post('/api/upload-photo', authRequired, upload.single('photo'), (req, res) => {
   if (!req.file) return res.status(400).json({ err: 'Файл не загружен' });
@@ -591,7 +945,9 @@ app.get('/api/dictionaries', authRequired, (req, res) => {
     invoiceStatuses: INVOICE_STATUSES,
     transportModes: TRANSPORT_MODES,
     cargoStatuses: CARGO_STATUSES,
-    passTypes: PASS_TYPES
+    passTypes: PASS_TYPES,
+    railKinds: RAIL_KINDS,
+    railStatuses: RAIL_STATUSES
   });
 });
 

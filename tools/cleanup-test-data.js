@@ -10,9 +10,9 @@
  *   DB_PATH=/path/to.db node tools/cleanup-test-data.js --apply
  *
  * Правила:
- *   • справочники — по маркерам теста (TEST*, WAG*, ТЕСТ-*, P/Q/T+цифры, REQ*);
- *   • документы (operations, invoices, invoice_items) — только созданные начиная
- *     с CUTOFF (до этой даты в рабочей БД лежат демо-данные сидов);
+ *   • справочники — по маркерам теста (TEST*, RAIL*, WAG*, ТЕСТ-*, P/Q/T+цифры, REQ*);
+ *   • документы (operations, invoices, invoice_items, rail_arrivals) — только созданные
+ *     начиная с CUTOFF (до этой даты в рабочей БД лежат демо-данные сидов);
  *   • doc_seq откатывается до номеров, которые были до последнего прогона.
  */
 const path = require('path');
@@ -31,7 +31,9 @@ const RULES = [
   ['vehicles', `driver = 'Тестер'`],
   ['operations', `created_at >= '${CUTOFF}'`],
   ['invoices', `created_at >= '${CUTOFF}'`],
-  ['containers', `number LIKE 'TEST%' OR client IN ('Тест', 'Realtime')`],
+  // Реестр прибытия ЖД ссылается на контейнеры/вагоны, поэтому чистится до справочников.
+  ['rail_arrivals', `created_at >= '${CUTOFF}'`],
+  ['containers', `number LIKE 'TEST%' OR number LIKE 'RAIL%' OR client IN ('Тест', 'Realtime')`],
   ['wagons', `number LIKE 'WAG%'`],
   ['tracks', `name LIKE 'Путь ТЕСТ-%'`],
   ['equipment', `name LIKE '%ТЕСТ-%' OR driver = 'Тест'`],
@@ -46,20 +48,31 @@ const SEQ_AFTER_CLEANUP = {
   'завоз': 6859,
   'вывоз': 14639,
   'накладная': 4853,
-  'пропуск': 20129
+  'пропуск': 20129,
+  'прибытие жд': 6859
 };
 
 const db = new Database(DB_PATH);
-const plan = [];
 
-for (const [table, where] of RULES) {
+// Старая БД может не содержать новых таблиц (например, rail_arrivals до первого запуска
+// сервера с обновлённой схемой) — такие правила пропускаем, а не падаем с ошибкой.
+const existing = new Set(
+  db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name)
+);
+const activeRules = RULES.filter(([table]) => existing.has(table));
+const skipped = RULES.filter(([table]) => !existing.has(table)).map(([table]) => table);
+if (skipped.length) console.log(`Пропущены отсутствующие таблицы: ${skipped.join(', ')}\n`);
+
+const plan = [];
+for (const [table, where] of activeRules) {
   const rows = db.prepare(`SELECT * FROM ${table} WHERE ${where}`).all();
   plan.push({ table, where, rows });
 }
 
-const totalDocs = plan.filter((p) => ['operations', 'invoices', 'invoice_items'].includes(p.table))
+const DOC_TABLES = ['operations', 'invoices', 'invoice_items', 'rail_arrivals'];
+const totalDocs = plan.filter((p) => DOC_TABLES.includes(p.table))
   .reduce((n, p) => n + p.rows.length, 0);
-const totalDicts = plan.filter((p) => !['operations', 'invoices', 'invoice_items', 'audit_log'].includes(p.table))
+const totalDicts = plan.filter((p) => !DOC_TABLES.concat('audit_log').includes(p.table))
   .reduce((n, p) => n + p.rows.length, 0);
 const totalLogs = (plan.find((p) => p.table === 'audit_log') || { rows: [] }).rows.length;
 
@@ -92,7 +105,7 @@ db.backup(backup).then(() => {
   const run = db.transaction(() => {
     // Проверку внешних ключей откладываем до COMMIT: документы ссылаются друг на друга.
     db.pragma('defer_foreign_keys = ON');
-    for (const [table, where] of RULES) {
+    for (const [table, where] of activeRules) {
       db.prepare(`DELETE FROM ${table} WHERE ${where}`).run();
     }
     const upd = db.prepare('UPDATE doc_seq SET last_no = ? WHERE scope = ?');
@@ -100,7 +113,7 @@ db.backup(backup).then(() => {
   });
   run();
   console.log('Очистка выполнена.');
-  for (const [table] of RULES) {
+  for (const [table] of activeRules) {
     console.log(`   ${table}: осталось ${db.prepare(`SELECT COUNT(*) c FROM ${table}`).get().c}`);
   }
   console.log('doc_seq:', JSON.stringify(db.prepare('SELECT * FROM doc_seq').all()));

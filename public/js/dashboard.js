@@ -15,6 +15,7 @@
     overview: { label: 'Обзор', icon: '📊', roles: ['admin', 'director', 'dispatcher', 'ppjt', 'receiver', 'crane', 'store', 'guard', 'customs', 'finance', 'shift'] },
     inbound: { label: 'Завоз', icon: '📥', roles: ['admin', 'dispatcher', 'receiver', 'ppjt', 'store', 'guard', 'shift'] },
     outbound: { label: 'Вывоз', icon: '📤', roles: ['admin', 'dispatcher', 'receiver', 'ppjt', 'store', 'guard', 'shift'] },
+    rail: { label: 'Прибытие ЖД', icon: '🚆', roles: ['admin', 'director', 'dispatcher', 'receiver', 'ppjt', 'store', 'guard', 'shift'] },
     invoices: { label: 'Расходные накладные', icon: '🧾', roles: ['admin', 'dispatcher', 'finance', 'store', 'shift'] },
     dictionaries: { label: 'Справочники', icon: '🗂️', roles: ['admin', 'dispatcher', 'shift'] },
     containers: { label: 'Контейнеры', icon: '📦', roles: ['admin', 'dispatcher', 'receiver', 'crane', 'store', 'shift', 'customs'] },
@@ -113,6 +114,8 @@
       { label: 'Вывоз за сутки', value: s.operationsOut, sub: `В работе: ${s.operationsOpen}`, icon: '📤', cls: 'green' },
       { label: 'Накладные за сутки', value: s.invoicesToday, sub: 'Расходные накладные', icon: '🧾', cls: 'orange' },
       { label: 'Пропуска за сутки', value: s.passesToday, sub: 'Пропускной режим', icon: '🛂', cls: 'purple' },
+      { label: 'Прибытие ЖД за месяц', value: s.railMonth, sub: `За сутки: ${s.railToday}`, icon: '🚆', cls: 'teal' },
+      { label: 'Расхождения пломб', value: s.railSealMismatch, sub: 'Требуют сверки', icon: '🔍', cls: 'red' },
       { label: 'Контейнеры на терминале', value: s.containersFull, sub: `Всего: ${s.containers}`, icon: '📦', cls: 'blue' },
       { label: 'Вагоны на путях', value: s.wagonsOnTrack, sub: `Всего: ${s.wagons}`, icon: '🚂', cls: 'green' },
       { label: 'Спецтехника свободна', value: s.eqFree, sub: `Всего: ${s.equipment}`, icon: '🏗️', cls: 'orange' },
@@ -137,6 +140,7 @@
           ${allowedNav.includes('inbound') ? `<button class="btn btn-primary" data-go="inbound">📥 Завоз</button>` : ''}
           ${allowedNav.includes('outbound') ? `<button class="btn btn-primary" data-go="outbound">📤 Вывоз</button>` : ''}
           ${allowedNav.includes('invoices') ? `<button class="btn btn-primary" data-go="invoices">🧾 Расходные накладные</button>` : ''}
+          ${allowedNav.includes('rail') ? `<button class="btn btn-primary" data-go="rail">🚆 Прибытие ЖД</button>` : ''}
           ${allowedNav.includes('containers') ? `<button class="btn btn-primary" data-go="containers">📦 Контейнеры</button>` : ''}
           ${allowedNav.includes('tracks') ? `<button class="btn btn-primary" data-go="tracks">🚂 Пути и вагоны</button>` : ''}
           ${allowedNav.includes('queue') ? `<button class="btn btn-primary" data-go="queue">🔢 Очередь</button>` : ''}

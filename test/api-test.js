@@ -474,6 +474,134 @@ const TS = Date.now().toString().slice(-6);
     log(foreignPatch.status === 403, 'client НЕ может править чужую заявку → 403', `status=${foreignPatch.status}`);
   }
 
+  console.log('\n===== 12. ПРИБЫТИЕ ЖД ТРАНСПОРТОМ =====');
+  const TR = await login('receiver', 'recv123');
+  log(!!TR, 'Вход receiver (приёмосдатчик)');
+
+  const dictRail = await req('GET', '/api/dictionaries', { token: T });
+  log(dictRail.status === 200 && (dictRail.data?.railKinds || []).includes('Порожний')
+    && (dictRail.data?.railStatuses || []).includes('оформлен'),
+    'GET /api/dictionaries отдаёт словари реестра прибытия ЖД',
+    `railKinds=${JSON.stringify(dictRail.data?.railKinds)}, railStatuses=${JSON.stringify(dictRail.data?.railStatuses)}`);
+
+  const nowRail = new Date();
+  const curYear = nowRail.getFullYear();
+  const curMonth = nowRail.getMonth() + 1;
+  const railCont = 'RAIL' + TS;
+  const railWagon = 'WAGJ' + TS;
+
+  const railCreate = await req('POST', '/api/rail-arrivals', {
+    token: TR,
+    body: {
+      arrival_year: curYear, arrival_month: curMonth, arrival_time: '14:35', code: 'kzt-alm',
+      wagon_number: railWagon, container_number: railCont.toLowerCase(), container_kind: '40',
+      container_weight: 24.5, seal_doc: 'seal-001', seal_fact: 'seal-777',
+      owner_id: cpId, recipient_id: cpId, gps_mark: 'gps-77', has_gps: 1,
+      status: 'прибыл', comment: 'тестовая подача'
+    }
+  });
+  log(railCreate.status === 201 && /^\d{5}$/.test(String(railCreate.data?.doc_no)),
+    'POST /api/rail-arrivals (номер из 5 цифр)', `doc_no=${railCreate.data?.doc_no}`);
+  const railId = railCreate.data?.id;
+  log(railCreate.data?.arrival_year === curYear && railCreate.data?.arrival_month === curMonth
+    && railCreate.data?.arrival_time === '14:35',
+    'Период прибытия (месяц года) и время сохранены', `период=${railCreate.data?.arrival_month}.${railCreate.data?.arrival_year} ${railCreate.data?.arrival_time}`);
+  log(railCreate.data?.container_number === railCont && railCreate.data?.code === 'KZT-ALM'
+    && railCreate.data?.wagon_number === railWagon,
+    'Номера контейнера/вагона и код нормализованы к верхнему регистру',
+    `контейнер=${railCreate.data?.container_number}, код=${railCreate.data?.code}`);
+  log(railCreate.data?.seal_mismatch === 1,
+    'Расхождение пломб зафиксировано (документ ≠ факт)',
+    `док=${railCreate.data?.seal_doc}, факт=${railCreate.data?.seal_fact}, mismatch=${railCreate.data?.seal_mismatch}`);
+  log(railCreate.data?.has_gps === 1 && railCreate.data?.gps_mark === 'GPS-77'
+    && railCreate.data?.owner_name === cpName && railCreate.data?.recipient_name === cpName,
+    'Метка ГПС, собственник и грузополучатель подтянуты', `гпс=${railCreate.data?.gps_mark}, собственник=${railCreate.data?.owner_name}`);
+
+  // Интеграция со справочниками: прибытие создаёт карточки контейнера и вагона
+  const railContCard = (await req('GET', '/api/containers', { token: T })).data?.find((c) => c.number === railCont);
+  log(!!railContCard && railContCard.size === '40' && railContCard.type === 'Гружёный' && railContCard.status === 'на_терминале',
+    'Прибытие создало карточку контейнера (вид 40 → 40 футовый гружёный)',
+    `контейнер=${railContCard?.number}, ${railContCard?.size}фт, ${railContCard?.type}`);
+  const railWagonCard = (await req('GET', '/api/wagons', { token: T })).data?.find((w) => w.number === railWagon);
+  log(!!railWagonCard && railWagonCard.operation === 'прибытие',
+    'Прибытие создало карточку вагона', `вагон=${railWagonCard?.number}, операция=${railWagonCard?.operation}`);
+
+  const railList = await req('GET', `/api/rail-arrivals?year=${curYear}&month=${curMonth}`, { token: T });
+  const railSummary = railList.data?.summary || {};
+  log(railList.status === 200 && (railList.data?.items || []).some((r) => r.id === railId),
+    'GET /api/rail-arrivals?year&month (фильтр по месяцу года)', `записей=${railList.data?.items?.length}`);
+  log(railSummary.total >= 1 && railSummary.mismatch >= 1 && railSummary.weight >= 24.5 && railSummary.withGps >= 1,
+    'Сводка периода: количество, вес, расхождения пломб, метки ГПС',
+    `всего=${railSummary.total}, вес=${railSummary.weight}, расхождения=${railSummary.mismatch}, ГПС=${railSummary.withGps}`);
+  log((railSummary.byKind || {})['40'] >= 1, 'Сводка по видам к-ра', `byKind=${JSON.stringify(railSummary.byKind)}`);
+
+  const railMismatchOnly = await req('GET', '/api/rail-arrivals?mismatch=1', { token: T });
+  log(railMismatchOnly.status === 200 && (railMismatchOnly.data?.items || []).every((r) => r.seal_mismatch === 1)
+    && (railMismatchOnly.data?.items || []).some((r) => r.id === railId),
+    'Фильтр «только расхождения пломб»', `записей=${railMismatchOnly.data?.items?.length}`);
+
+  const railSearch = await req('GET', '/api/rail-arrivals?q=' + railCont.toLowerCase(), { token: T });
+  log(railSearch.status === 200 && (railSearch.data?.items || []).some((r) => r.id === railId),
+    'Поиск по реестру (номер контейнера)', `найдено=${railSearch.data?.items?.length}`);
+
+  const railCard = await req('GET', '/api/rail-arrivals/' + railId, { token: T });
+  log(railCard.status === 200 && railCard.data?.id === railId, 'GET /api/rail-arrivals/:id', `status=${railCard.status}`);
+
+  const railPatch = await req('PATCH', '/api/rail-arrivals/' + railId, {
+    token: TR, body: { seal_fact: 'SEAL-001', status: 'оформлен', container_weight: 25 }
+  });
+  log(railPatch.status === 200 && railPatch.data?.seal_mismatch === 0 && railPatch.data?.status === 'оформлен'
+    && railPatch.data?.container_weight === 25,
+    'PATCH: сверка пломбы снимает расхождение, статус и вес обновляются',
+    `mismatch=${railPatch.data?.seal_mismatch}, статус=${railPatch.data?.status}`);
+
+  const railPatchPeriod = await req('PATCH', '/api/rail-arrivals/' + railId, { token: TR, body: { arrival_month: 13 } });
+  log(railPatchPeriod.status === 200 && railPatchPeriod.data?.arrival_month === curMonth,
+    'Недопустимый месяц → прежний период (валидация 1–12)', `месяц=${railPatchPeriod.data?.arrival_month}`);
+
+  const railNoContainer = await req('POST', '/api/rail-arrivals', { token: TR, body: { code: 'X' + TS } });
+  log(railNoContainer.status === 400, 'Запись без номера контейнера → 400', `status=${railNoContainer.status}`);
+
+  const railGpsBad = await req('POST', '/api/rail-arrivals', {
+    token: TR, body: { container_number: 'GPS' + TS, has_gps: 1 }
+  });
+  log(railGpsBad.status === 400, 'Метка ГПС без номера метки → 400', `status=${railGpsBad.status}`);
+
+  const railPatch404 = await req('PATCH', '/api/rail-arrivals/999999', { token: T, body: { status: 'прибыл' } });
+  log(railPatch404.status === 404, 'PATCH несуществующей записи → 404', `status=${railPatch404.status}`);
+
+  const railStats = await req('GET', '/api/stats', { token: T });
+  log(railStats.status === 200 && railStats.data?.railMonth >= 1
+    && typeof railStats.data?.railToday === 'number' && typeof railStats.data?.railSealMismatch === 'number',
+    'GET /api/stats содержит метрики прибытия ЖД',
+    `за месяц=${railStats.data?.railMonth}, за сутки=${railStats.data?.railToday}, расхождения=${railStats.data?.railSealMismatch}`);
+
+  const railReport = await req('GET', `/api/report/rail-arrivals?year=${curYear}&month=${curMonth}`, { token: T });
+  log(railReport.status === 200 && railReport.ct.includes('application/pdf') && railReport.data?.length > 500,
+    'GET /api/report/rail-arrivals (PDF-реестр за месяц)', `тип=${railReport.ct}, байт=${railReport.data?.length}`);
+
+  // --- RBAC реестра прибытия ---
+  const clientRail = await req('POST', '/api/rail-arrivals', { token: TC, body: { container_number: 'CL' + TS } });
+  log(clientRail.status === 403, 'client НЕ может вносить прибытие ЖД → 403', `status=${clientRail.status}`);
+
+  const driverRail = await req('POST', '/api/rail-arrivals', { token: TD, body: { container_number: 'DR' + TS } });
+  log(driverRail.status === 403, 'driver НЕ может вносить прибытие ЖД → 403', `status=${driverRail.status}`);
+
+  const guardRail = await req('POST', '/api/rail-arrivals', {
+    token: TG, body: { container_number: 'GR' + TS, container_kind: 'Порожний', status: 'ожидается' }
+  });
+  log(guardRail.status === 201, 'guard МОЖЕТ зафиксировать подачу (как и завоз) → 201', `status=${guardRail.status}`);
+
+  const guardRailDel = await req('DELETE', '/api/rail-arrivals/' + railId, { token: TG });
+  log(guardRailDel.status === 403, 'guard НЕ может удалять записи реестра → 403', `status=${guardRailDel.status}`);
+
+  const adminRailDel = await req('DELETE', '/api/rail-arrivals/' + (guardRail.data?.id || 999999), { token: T });
+  log(adminRailDel.status === 200 && adminRailDel.data?.ok === true,
+    'admin МОЖЕТ удалить ошибочную запись → 200', `status=${adminRailDel.status}`);
+
+  const railGone = await req('GET', '/api/rail-arrivals/' + (guardRail.data?.id || 999999), { token: T });
+  log(railGone.status === 404, 'Удалённая запись больше не читается → 404', `status=${railGone.status}`);
+
   console.log('\n========== ИТОГ ==========');
   console.log(`✅ Пройдено: ${pass}`);
   console.log(`❌ Провалено: ${fail}`);

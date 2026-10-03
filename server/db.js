@@ -245,6 +245,43 @@ db.exec(`
     FOREIGN KEY (responsible_id) REFERENCES users(id)
   );
 
+  -- Прибытие ЖД транспортом: реестр прибытия контейнеров по железной дороге.
+  -- «Прибытие за месяц года / время» хранится раздельно (год, месяц, время) — так
+  -- реестр фильтруется по отчётному периоду и при этом сохраняет точное время подачи.
+  -- Пломба по документу и фактическая пломба лежат в разных полях: приёмосдатчик
+  -- сверяет их при осмотре, и расхождение подсвечивается в интерфейсе.
+  CREATE TABLE IF NOT EXISTS rail_arrivals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    doc_no TEXT NOT NULL,
+    arrival_year INTEGER,
+    arrival_month INTEGER,
+    arrival_time TEXT DEFAULT '',
+    arrival_at TEXT,
+    code TEXT DEFAULT '',
+    wagon_number TEXT DEFAULT '',
+    wagon_id INTEGER,
+    container_number TEXT DEFAULT '',
+    container_id INTEGER,
+    container_kind TEXT DEFAULT '20',
+    container_weight REAL DEFAULT 0,
+    seal_doc TEXT DEFAULT '',
+    seal_fact TEXT DEFAULT '',
+    owner_id INTEGER,
+    recipient_id INTEGER,
+    gps_mark TEXT DEFAULT '',
+    has_gps INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'ожидается',
+    comment TEXT DEFAULT '',
+    responsible_id INTEGER,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (wagon_id) REFERENCES wagons(id),
+    FOREIGN KEY (container_id) REFERENCES containers(id),
+    FOREIGN KEY (owner_id) REFERENCES counterparties(id),
+    FOREIGN KEY (recipient_id) REFERENCES counterparties(id),
+    FOREIGN KEY (responsible_id) REFERENCES users(id)
+  );
+
   -- Строки расходной накладной: одна накладная — много контейнеров
   CREATE TABLE IF NOT EXISTS invoice_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -268,6 +305,10 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_operations_status ON operations(status);
   CREATE INDEX IF NOT EXISTS idx_operations_basis ON operations(basis_id);
   CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id);
+  -- Реестр прибытия ЖД: выборка за месяц года и поиск по номерам вагона/контейнера
+  CREATE INDEX IF NOT EXISTS idx_rail_period ON rail_arrivals(arrival_year, arrival_month);
+  CREATE INDEX IF NOT EXISTS idx_rail_wagon ON rail_arrivals(wagon_number);
+  CREATE INDEX IF NOT EXISTS idx_rail_container ON rail_arrivals(container_number);
 `);
 
 // ---------- Миграции ----------
@@ -369,6 +410,7 @@ function seed() {
     insertSeq.run('вывоз', 14639);
     insertSeq.run('накладная', 4853);
     insertSeq.run('пропуск', 20129);
+    insertSeq.run('прибытие жд', 6859);
   }
 }
 seed();

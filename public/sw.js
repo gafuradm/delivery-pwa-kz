@@ -1,4 +1,4 @@
-const CACHE_NAME = 'qazconhub-cache-v7';
+const CACHE_NAME = 'qazconhub-cache-v8';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -8,6 +8,7 @@ const STATIC_ASSETS = [
   '/js/dashboard.js',
   '/js/dashboard-views.js',
   '/js/dashboard-docs.js',
+  '/js/dashboard-rail.js',
   '/manifest.json'
 ];
 
